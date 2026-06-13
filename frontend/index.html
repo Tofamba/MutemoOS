@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Mutemo Desk — Zimbabwe Legal Practice</title>
+<style>
+/* ── Reset & Base ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --green:#1b4d2e;--green2:#245f39;--green3:#2e7a49;
+  --gold:#b8922a;--gold2:#d4a832;--gold3:#f0c84a;
+  --ink:#1a1a18;--ink2:#3d3d38;--ink3:#6b6b64;
+  --paper:#faf8f4;--paper2:#f2efe8;--paper3:#e8e4da;
+  --white:#ffffff;--border:#d8d3c8;
+  --red:#b83232;--blue:#1e4a7a;
+  --radius:6px;--shadow:0 1px 3px rgba(0,0,0,0.08);
+}
+body{font-family:'Georgia',serif;background:var(--paper);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.6}
+h1,h2,h3,h4{font-family:'Georgia',serif;font-weight:700;color:var(--ink)}
+button,input,select,textarea{font-family:'Georgia',serif}
+a{color:var(--green);text-decoration:none}
+
+/* ── Layout ── */
+.app{display:flex;flex-direction:column;min-height:100vh}
+
+/* ── Header ── */
+.header{background:var(--green);color:white;padding:0 1.5rem;height:58px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 6px rgba(0,0,0,0.2)}
+.header-brand{display:flex;align-items:center;gap:12px}
+.header-seal{width:36px;height:36px;background:var(--gold2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;border:2px solid rgba(255,255,255,0.2)}
+.header-title{font-size:1.1rem;font-weight:700;letter-spacing:0.3px;color:white}
+.header-subtitle{font-size:0.7rem;color:rgba(255,255,255,0.65);margin-top:1px;letter-spacing:0.5px}
+.header-firm{font-size:0.75rem;color:var(--gold3);font-style:italic}
+
+/* ── Nav ── */
+.nav{background:var(--green2);display:flex;gap:0;border-bottom:2px solid var(--gold)}
+.nav-btn{background:none;border:none;color:rgba(255,255,255,0.7);padding:0.7rem 1.2rem;cursor:pointer;font-size:0.82rem;font-family:'Georgia',serif;letter-spacing:0.3px;transition:all 0.15s;display:flex;align-items:center;gap:6px;position:relative}
+.nav-btn:hover{color:white;background:rgba(255,255,255,0.07)}
+.nav-btn.active{color:white;background:rgba(255,255,255,0.12)}
+.nav-btn.active::after{content:'';position:absolute;bottom:-2px;left:0;right:0;height:2px;background:var(--gold3)}
+.nav-badge{background:var(--red);color:white;font-size:0.6rem;padding:1px 5px;border-radius:10px;font-style:normal;min-width:16px;text-align:center}
+
+/* ── Main ── */
+.main{flex:1;max-width:1080px;margin:0 auto;width:100%;padding:1.5rem}
+
+/* ── Cards ── */
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:1rem}
+.card-header{padding:0.9rem 1.25rem;border-bottom:1px solid var(--border);background:var(--paper);display:flex;align-items:center;gap:10px}
+.card-icon{width:28px;height:28px;background:var(--green);color:white;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.card-title{font-size:0.9rem;font-weight:700;color:var(--ink)}
+.card-desc{font-size:0.72rem;color:var(--ink3);margin-top:1px}
+.card-body{padding:1.25rem}
+
+/* ── Section Header ── */
+.section-head{margin-bottom:1.25rem}
+.section-head h2{font-size:1.15rem;color:var(--green);display:flex;align-items:center;gap:8px}
+.section-head p{font-size:0.82rem;color:var(--ink3);margin-top:4px}
+
+/* ── Forms ── */
+.form-section{margin-bottom:1.1rem}
+.form-section-label{font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.9px;color:var(--green);margin-bottom:0.6rem;padding-bottom:0.3rem;border-bottom:1px solid var(--gold2)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:0.75rem}
+.form-group{margin-bottom:0.65rem}
+.form-group:last-child{margin-bottom:0}
+label{display:block;font-size:0.73rem;font-weight:700;color:var(--ink3);margin-bottom:0.28rem;letter-spacing:0.2px}
+input[type=text],input[type=date],input[type=time],input[type=email],select,textarea{width:100%;padding:0.45rem 0.65rem;border:1px solid var(--border);border-radius:4px;font-size:0.84rem;font-family:'Georgia',serif;color:var(--ink);background:var(--white);transition:border-color 0.15s}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 2px rgba(27,77,46,0.1)}
+textarea{resize:vertical;line-height:1.55}
+select{cursor:pointer}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:0.5rem 1rem;border:none;border-radius:4px;font-size:0.82rem;font-family:'Georgia',serif;cursor:pointer;transition:all 0.15s;font-weight:700}
+.btn-primary{background:var(--green);color:white;width:100%;justify-content:center;margin-top:0.5rem;padding:0.65rem}
+.btn-primary:hover:not(:disabled){background:var(--green2)}
+.btn-primary:disabled{opacity:0.5;cursor:not-allowed}
+.btn-gold{background:var(--gold2);color:var(--green);width:100%;justify-content:center}
+.btn-gold:hover{background:var(--gold3)}
+.btn-outline{background:white;color:var(--ink2);border:1px solid var(--border)}
+.btn-outline:hover{background:var(--paper2);border-color:var(--ink3)}
+.btn-sm{padding:0.3rem 0.65rem;font-size:0.75rem}
+.btn-danger{background:var(--red);color:white}
+.btn-danger:hover{background:#a02828}
+
+/* ── Status ── */
+.status{padding:0.55rem 0.85rem;border-radius:4px;font-size:0.8rem;margin-bottom:0.75rem;display:none}
+.status.show{display:block}
+.status.loading{background:#e8f2ed;color:#1b4d2e;border:1px solid #a8ccb8}
+.status.error{background:#fdecea;color:#8a1a0a;border:1px solid #f0b0a8}
+.status.success{background:#eaf5ee;color:#1b4d2e;border:1px solid #a8d4b8}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Result area ── */
+.result-area{min-height:200px;background:var(--paper);border:1px solid var(--border);border-radius:4px;padding:1.1rem;font-family:'Times New Roman',serif;font-size:0.88rem;line-height:1.8;color:var(--ink);white-space:pre-wrap;overflow-y:auto;max-height:550px}
+.result-area[contenteditable=true]:focus{outline:2px solid var(--green);outline-offset:-2px}
+.result-placeholder{text-align:center;padding:3rem 1rem;color:var(--ink3)}
+.result-placeholder .icon{font-size:2.5rem;opacity:0.25;margin-bottom:0.75rem}
+
+/* ── Matter list ── */
+.matter-item{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:0.6rem;transition:box-shadow 0.15s}
+.matter-item:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.matter-row{padding:0.85rem 1rem;display:flex;align-items:center;gap:10px;cursor:pointer}
+.matter-icon{width:32px;height:32px;background:var(--paper2);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;border:1px solid var(--border)}
+.matter-name{font-weight:700;font-size:0.88rem;color:var(--ink)}
+.matter-meta{font-size:0.72rem;color:var(--ink3);margin-top:2px}
+.matter-expand{flex:1}
+.matter-actions{display:flex;gap:6px}
+.matter-docs{border-top:1px solid var(--border);padding:0.75rem 1rem;display:none}
+.matter-docs.open{display:block}
+
+/* ── Doc item ── */
+.doc-item{display:flex;align-items:center;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--paper3)}
+.doc-item:last-child{border-bottom:none}
+.doc-name{font-size:0.82rem;color:var(--ink2);flex:1}
+.doc-meta{font-size:0.7rem;color:var(--ink3)}
+
+/* ── Tags / Chips ── */
+.chip{display:inline-block;font-size:0.65rem;padding:2px 8px;border-radius:12px;font-weight:700;letter-spacing:0.3px;margin-right:4px}
+.chip-green{background:#e0f0e8;color:var(--green)}
+.chip-gold{background:#f5ead0;color:var(--gold)}
+.chip-blue{background:#e0eaf5;color:var(--blue)}
+.chip-gray{background:var(--paper2);color:var(--ink3)}
+.chip-red{background:#fde8e8;color:var(--red)}
+
+/* ── Search results ── */
+.search-result{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.75rem;overflow:hidden}
+.sr-header{padding:0.85rem 1rem;display:flex;align-items:start;gap:10px}
+.sr-body{padding:0 1rem 0.85rem}
+.sr-excerpt{background:var(--paper);border-left:3px solid var(--gold2);padding:0.65rem 0.85rem;font-size:0.82rem;line-height:1.65;color:var(--ink2);margin-bottom:0.65rem;font-family:'Times New Roman',serif}
+.sr-score{font-size:0.7rem;padding:2px 7px;border-radius:10px;background:#e8f5ee;color:var(--green);font-weight:700}
+.ai-answer{background:linear-gradient(135deg,#e8f2ec,#f5f0e8);border:1px solid #b8d4c0;border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1.25rem}
+.ai-answer-label{font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--green);margin-bottom:0.5rem}
+.ai-answer-text{font-size:0.84rem;line-height:1.7;color:var(--ink2);white-space:pre-wrap}
+
+/* ── Calendar ── */
+.cal-event{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:0.85rem 1rem;margin-bottom:0.6rem;display:flex;align-items:center;gap:12px}
+.cal-date-block{background:var(--green);color:white;border-radius:4px;padding:0.4rem 0.6rem;text-align:center;flex-shrink:0;min-width:52px}
+.cal-day{font-size:1.3rem;font-weight:700;line-height:1}
+.cal-month{font-size:0.6rem;letter-spacing:0.5px;text-transform:uppercase;margin-top:2px}
+.cal-details{flex:1}
+.cal-title{font-weight:700;font-size:0.88rem;color:var(--ink)}
+.cal-meta{font-size:0.72rem;color:var(--ink3);margin-top:3px}
+.event-type-hearing{border-left:3px solid var(--red)}
+.event-type-deadline{border-left:3px solid var(--gold)}
+.event-type-meeting{border-left:3px solid var(--blue)}
+.event-type-filing{border-left:3px solid var(--green)}
+.urgent{background:#fff8e8;border-color:#e8c870}
+
+/* ── Upload area ── */
+.upload-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:2rem;text-align:center;cursor:pointer;transition:all 0.15s;background:var(--paper)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--green);background:#e8f2ec}
+.upload-zone p{font-size:0.82rem;color:var(--ink3);margin-top:0.5rem}
+.upload-list{margin-top:0.75rem}
+.upload-item{display:flex;align-items:center;gap:8px;padding:0.5rem 0.75rem;background:var(--paper2);border-radius:4px;margin-bottom:0.4rem;font-size:0.8rem}
+.upload-item .name{flex:1;color:var(--ink2)}
+
+/* ── Misc ── */
+.divider{border:none;border-top:1px solid var(--border);margin:1rem 0}
+.empty-state{text-align:center;padding:3rem 1rem;color:var(--ink3)}
+.empty-state .icon{font-size:2.5rem;opacity:0.2;margin-bottom:0.75rem}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.actions-row{display:flex;gap:0.5rem;margin-top:0.75rem}
+.actions-row .btn{flex:1}
+.doc-id{font-size:0.65rem;color:var(--ink3);text-align:right;margin-top:0.3rem}
+.tip{background:#e8f2ec;border:1px solid #b8d4c0;border-radius:4px;padding:0.65rem 0.85rem;font-size:0.75rem;color:var(--green);margin-top:0.75rem}
+.upcoming-banner{background:var(--green);color:white;border-radius:var(--radius);padding:0.85rem 1.1rem;margin-bottom:1rem;display:flex;align-items:center;gap:10px}
+.upcoming-banner .icon{font-size:1.3rem}
+.upcoming-banner strong{font-size:0.88rem}
+.upcoming-banner p{font-size:0.75rem;opacity:0.8;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- Header -->
+<header class="header">
+  <div class="header-brand">
+    <div class="header-seal">⚖</div>
+    <div>
+      <div class="header-title">Mutemo Desk</div>
+      <div class="header-subtitle">ZIMBABWE LEGAL PRACTICE SYSTEM</div>
+    </div>
+  </div>
+  <div class="header-firm">Sawyer &amp; Mkushi Legal Practitioners</div>
+</header>
+
+<!-- Nav -->
+<nav class="nav">
+  <button class="nav-btn" id="nav-vault" onclick="showTab('vault')">📁 Vault</button>
+  <button class="nav-btn active" id="nav-search" onclick="showTab('search')">🔍 Search Vault</button>
+  <button class="nav-btn" id="nav-matters" onclick="showTab('matters')">📂 Matters</button>
+  <button class="nav-btn" id="nav-affidavit" onclick="showTab('affidavit')">📄 Draft Affidavit</button>
+  <button class="nav-btn" id="nav-calendar" onclick="showTab('calendar')">📅 Court Calendar <span class="nav-badge" id="cal-badge" style="display:none">0</span></button>
+  <button class="nav-btn" id="nav-legalupdates" onclick="showTab('legalupdates')">⚖ Legal Updates</button>
+</nav>
+
+<main class="main">
+
+<!-- ═══════════════ VAULT TAB ═══════════════ -->
+<div id="tab-vault" style="display:none">
+  <div class="section-head">
+    <h2>📁 Precedent Vault</h2>
+    <p>Upload PDFs, Word documents, and emails. Mutemo Desk indexes them for intelligent search.</p>
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">📂</div>
+          <div><div class="card-title">Select Matter</div><div class="card-desc">Assign documents to a matter</div></div>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Matter</label>
+            <select id="upload-matter-select" onchange="onUploadMatterChange()">
+              <option value="">— Select existing matter —</option>
+            </select>
+          </div>
+          <div style="text-align:center;font-size:0.75rem;color:var(--ink3);margin:0.5rem 0">or create new</div>
+          <div class="form-group">
+            <label>New Matter Name</label>
+            <input type="text" id="new-matter-name" placeholder="e.g. Moyo v Dube — Stand 245 Borrowdale"/>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Case Number</label>
+              <input type="text" id="new-matter-number" placeholder="HC 1234/25"/>
+            </div>
+            <div class="form-group">
+              <label>Matter Type</label>
+              <select id="new-matter-type">
+                <option value="">— Select —</option>
+                <option value="eviction">Eviction</option>
+                <option value="estate">Estate Administration</option>
+                <option value="employment">Employment</option>
+                <option value="commercial_property">Commercial Property</option>
+                <option value="commercial_contract">Commercial Contract</option>
+                <option value="customary_law">Customary Law</option>
+                <option value="matrimonial">Matrimonial</option>
+                <option value="company_law">Company Law</option>
+                <option value="criminal">Criminal</option>
+                <option value="constitutional">Constitutional</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="createMatterFromVault()" style="width:100%">Create Matter</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">⬆</div>
+          <div><div class="card-title">Upload Documents</div><div class="card-desc">PDF, DOCX, TXT, EML supported</div></div>
+        </div>
+        <div class="card-body">
+          <div id="vault-status" class="status"></div>
+          <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()"
+               ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+            <div style="font-size:2rem">📎</div>
+            <strong style="font-size:0.88rem">Drop files here or click to browse</strong>
+            <p>PDF, DOCX, TXT, EML</p>
+            <input type="file" id="file-input" style="display:none" multiple accept=".pdf,.docx,.doc,.txt,.eml,.msg" onchange="handleFileSelect(event)"/>
+          </div>
+          <div class="upload-list" id="upload-list"></div>
+          <button class="btn btn-primary" id="upload-btn" onclick="processUploads()" disabled>
+            Index documents into Precedent Vault
+          </button>
+          <div class="tip">Documents are chunked and indexed for semantic search. The AI will learn your firm's drafting style and precedents.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SEARCH TAB ═══════════════ -->
+<div id="tab-search">
+  <div class="section-head">
+    <h2>🔍 Search Precedent Vault</h2>
+    <p>Ask in plain English. Mutemo Desk searches your entire document history and synthesises an answer.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="form-group" style="margin-bottom:0.75rem">
+        <input type="text" id="search-query" placeholder="e.g. lease escalation clauses commercial property · customary inheritance arguments · eviction notice requirements"
+               onkeydown="if(event.key==='Enter')doSearch()" style="font-size:0.95rem;padding:0.65rem 0.85rem"/>
+      </div>
+      <div class="form-row" style="margin-bottom:0.75rem">
+        <div class="form-group" style="margin-bottom:0">
+          <select id="filter-matter-type">
+            <option value="">All matter types</option>
+            <option value="eviction">Eviction</option>
+            <option value="estate">Estate</option>
+            <option value="employment">Employment</option>
+            <option value="commercial_property">Commercial Property</option>
+            <option value="commercial_contract">Commercial Contract</option>
+            <option value="customary_law">Customary Law</option>
+            <option value="matrimonial">Matrimonial</option>
+            <option value="company_law">Company Law</option>
+            <option value="criminal">Criminal</option>
+            <option value="constitutional">Constitutional</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <select id="filter-doc-type">
+            <option value="">All document types</option>
+            <option value="affidavit">Affidavit</option>
+            <option value="founding_affidavit">Founding Affidavit</option>
+            <option value="opposing_affidavit">Opposing Affidavit</option>
+            <option value="lease_agreement">Lease Agreement</option>
+            <option value="heads_of_argument">Heads of Argument</option>
+            <option value="correspondence">Correspondence</option>
+            <option value="court_order">Court Order</option>
+            <option value="contract">Contract</option>
+            <option value="opinion">Opinion</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="doSearch()" id="search-btn" style="margin-top:0">
+        🔍 Search Vault
+      </button>
+    </div>
+  </div>
+
+  <div id="search-loading" style="display:none;text-align:center;padding:2rem;color:var(--ink3)">
+    <div class="spinner"></div> Searching vault and synthesising answer…
+  </div>
+
+  <div id="search-results"></div>
+
+  <div id="search-empty" style="text-align:center;padding:3rem;color:var(--ink3)">
+    <div style="font-size:2.5rem;opacity:0.2;margin-bottom:0.75rem">🔍</div>
+    <p style="font-size:0.85rem">Search your indexed documents using plain English.</p>
+    <p style="font-size:0.75rem;margin-top:0.5rem;color:var(--ink3)">Try: "lease escalation clauses" · "customary inheritance arguments" · "affidavits for eviction"</p>
+  </div>
+</div>
+
+<!-- ═══════════════ MATTERS TAB ═══════════════ -->
+<div id="tab-matters" style="display:none">
+  <div class="section-head">
+    <h2>📂 Matter Dashboard</h2>
+    <p>All matters with indexed documents. Click to expand and view files.</p>
+  </div>
+  <div id="matters-list"></div>
+</div>
+
+<!-- ═══════════════ AFFIDAVIT TAB ═══════════════ -->
+<div id="tab-affidavit" style="display:none">
+  <div class="grid-2">
+    <div>
+      <div class="section-head">
+        <h2>📄 Draft Affidavit</h2>
+        <p>AI drafts in Zimbabwe High Court form. Load a precedent to match the firm's style.</p>
+      </div>
+
+      <div id="precedent-banner" style="display:none" class="card" style="border:1px solid var(--gold2)">
+        <div class="card-body" style="padding:0.75rem 1rem;background:#fdf6e8;display:flex;align-items:center;gap:10px">
+          <span style="font-size:1rem">📎</span>
+          <div style="flex:1">
+            <div style="font-size:0.72rem;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px">Precedent Loaded</div>
+            <div id="precedent-filename" style="font-size:0.82rem;color:var(--ink2)"></div>
+          </div>
+          <button class="btn btn-sm btn-outline" onclick="clearPrecedent()">Clear</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div id="aff-status" class="status"></div>
+          <div class="form-section">
+            <div class="form-section-label">Deponent</div>
+            <div class="form-row">
+              <div class="form-group"><label>Full Name *</label><input type="text" id="aff-name" placeholder="JOHN TENDAI MOYO"/></div>
+              <div class="form-group"><label>National ID</label><input type="text" id="aff-id" placeholder="63-123456 A 00"/></div>
+            </div>
+            <div class="form-group"><label>Capacity</label><input type="text" id="aff-capacity" placeholder="the duly authorised representative of the Applicant"/></div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-label">Court &amp; Parties</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Court</label>
+                <select id="aff-court">
+                  <option>High Court of Zimbabwe</option>
+                  <option>Supreme Court of Zimbabwe</option>
+                  <option>Constitutional Court of Zimbabwe</option>
+                  <option>Magistrates Court, Harare</option>
+                  <option>Magistrates Court, Bulawayo</option>
+                  <option>Labour Court of Zimbabwe</option>
+                  <option>Administrative Court</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Matter Type</label>
+                <select id="aff-type">
+                  <option value="">— Select —</option>
+                  <option value="Eviction">Eviction</option>
+                  <option value="Estate Administration">Estate Administration</option>
+                  <option value="Employment Dispute">Employment Dispute</option>
+                  <option value="Commercial Property">Commercial Property</option>
+                  <option value="Commercial Contract">Commercial Contract</option>
+                  <option value="Customary Law">Customary Law</option>
+                  <option value="Matrimonial">Matrimonial</option>
+                  <option value="Company Law">Company Law</option>
+                  <option value="Criminal">Criminal</option>
+                  <option value="Constitutional">Constitutional</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group"><label>Parties</label><input type="text" id="aff-parties" placeholder="Applicant: John Moyo / Respondent: Peter Dube"/></div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-label">Matter</div>
+            <div class="form-group">
+              <label>Matter Summary *</label>
+              <textarea id="aff-summary" rows="4" placeholder="Describe the matter — what happened, what is in dispute, what outcome is sought…"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Key Facts (one per line)</label>
+              <textarea id="aff-facts" rows="5" placeholder="1. The lease was signed on 1 March 2023&#10;2. The respondent has not paid rent since June 2023&#10;3. Notice to vacate was served on 15 August 2023"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Relief Sought</label>
+              <textarea id="aff-relief" rows="2" placeholder="An order evicting the respondent from Stand 245 Borrowdale, Harare"></textarea>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" onclick="generateAffidavit()" id="gen-btn">
+            ⚖ Generate Affidavit
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-head">
+        <h2>Generated Affidavit</h2>
+        <p>AI-drafted, Zimbabwe High Court format. Edit before downloading.</p>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div id="aff-placeholder" class="result-placeholder">
+            <div class="icon">⚖</div>
+            <p style="font-size:0.85rem">Your affidavit will appear here.<br/>Complete the form and click Generate.</p>
+          </div>
+          <div id="aff-result" style="display:none">
+            <div id="aff-text" class="result-area" contenteditable="true" spellcheck="false"></div>
+            <div id="aff-docid" class="doc-id"></div>
+            <div class="actions-row">
+              <button class="btn btn-gold" onclick="downloadDocx()">⬇ Download .docx</button>
+              <button class="btn btn-outline" onclick="copyAffidavit()">📋 Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ CALENDAR TAB ═══════════════ -->
+<div id="tab-calendar" style="display:none">
+  <div class="grid-2">
+    <div>
+      <div class="section-head">
+        <h2>📅 Court Calendar</h2>
+        <p>Track hearings, deadlines, and filings. Never miss a court date.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">➕</div>
+          <div><div class="card-title">Add Event</div></div>
+        </div>
+        <div class="card-body">
+          <div id="cal-status" class="status"></div>
+          <div class="form-group">
+            <label>Event Title *</label>
+            <input type="text" id="cal-title" placeholder="e.g. Moyo v Dube — Hearing on Rule Nisi"/>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Type</label>
+              <select id="cal-type">
+                <option value="hearing">Court Hearing</option>
+                <option value="deadline">Deadline</option>
+                <option value="filing">Filing Date</option>
+                <option value="meeting">Client Meeting</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Matter</label>
+              <select id="cal-matter">
+                <option value="">— None —</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Date *</label>
+              <input type="date" id="cal-date"/>
+            </div>
+            <div class="form-group">
+              <label>Time</label>
+              <input type="time" id="cal-time"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Court / Location</label>
+            <input type="text" id="cal-court" placeholder="e.g. High Court Harare, Courtroom 3"/>
+          </div>
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea id="cal-notes" rows="2" placeholder="Any additional notes…"></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="addCalendarEvent()">📅 Add to Calendar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">✉</div>
+          <div><div class="card-title">Email Reminders</div><div class="card-desc">Daily summary of upcoming hearings &amp; deadlines</div></div>
+        </div>
+        <div class="card-body">
+          <div id="reminder-status" class="status"></div>
+          <div id="reminder-smtp-warning" style="display:none;margin-bottom:0.75rem" class="status show error">
+            Email sending is not configured on the server. Ask your administrator to set SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM.
+          </div>
+          <div class="form-group">
+            <label>Recipient Email</label>
+            <input type="email" id="reminder-email" placeholder="nyari@sawyermkushi.co.zw"/>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Send Time</label>
+              <select id="reminder-hour">
+                <option value="3">5:00 AM (CAT)</option>
+                <option value="4">6:00 AM (CAT)</option>
+                <option value="5" selected>7:00 AM (CAT)</option>
+                <option value="6">8:00 AM (CAT)</option>
+                <option value="7">9:00 AM (CAT)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Enabled</label>
+              <select id="reminder-enabled">
+                <option value="false">Off</option>
+                <option value="true">On — daily reminder</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions-row" style="margin-top:0.25rem">
+            <button class="btn btn-primary" onclick="saveReminderSettings()" style="margin-top:0">💾 Save Settings</button>
+            <button class="btn btn-outline" onclick="sendTestReminder()">✉ Send Test Email</button>
+          </div>
+          <div class="tip">Reminders cover events in the next 7 days, with anything today or tomorrow highlighted first. An .ics calendar file is attached so you can add events to your phone with one tap.</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-head">
+        <h2>Upcoming Events</h2>
+        <p>Sorted by date. Court hearings are highlighted.</p>
+      </div>
+      <div id="cal-upcoming"></div>
+    </div>
+  </div>
+
+  <hr class="divider"/>
+  <h3 style="font-size:0.95rem;color:var(--ink2);margin-bottom:0.75rem">All Events</h3>
+  <div id="cal-all"></div>
+</div>
+
+<!-- ═══════════════ LEGAL UPDATES TAB ═══════════════ -->
+<div id="tab-legalupdates" style="display:none">
+  <div class="section-head">
+    <h2>⚖ Legal Updates</h2>
+    <p>Zimbabwean legislation and case law — separate from your firm's private precedents. Upload Acts, Statutory Instruments, and judgments from ZimLII or Veritas.</p>
+  </div>
+
+  <div class="tip" style="margin-top:0;margin-bottom:1rem">
+    📌 <strong>How to use:</strong> Visit <a href="https://zimlii.org" target="_blank">zimlii.org</a> or <a href="https://veritaszim.net" target="_blank">veritaszim.net</a> as you normally would, download the Act, SI, or judgment PDF you need, then upload it here. Content remains attributed to its source (ZimLII content is CC BY-NC).
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">⬆</div>
+          <div><div class="card-title">Upload Legislation or Case Law</div><div class="card-desc">PDF, DOCX, or TXT</div></div>
+        </div>
+        <div class="card-body">
+          <div id="lu-status" class="status"></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Type</label>
+              <select id="lu-source-type">
+                <option value="legislation">Legislation (Act / SI)</option>
+                <option value="case_law">Case Law (Judgment)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Source</label>
+              <select id="lu-source-name">
+                <option value="ZimLII">ZimLII</option>
+                <option value="Veritas">Veritas</option>
+                <option value="Government Gazette">Government Gazette</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Reference (optional)</label>
+            <input type="text" id="lu-reference" placeholder="e.g. SI 76 of 2025, or HH 123-25"/>
+          </div>
+          <div class="upload-zone" id="lu-upload-zone" onclick="document.getElementById('lu-file-input').click()"
+               ondrop="handleLuDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+            <div style="font-size:2rem">📜</div>
+            <strong style="font-size:0.88rem">Drop file here or click to browse</strong>
+            <p>PDF, DOCX, TXT</p>
+            <input type="file" id="lu-file-input" style="display:none" accept=".pdf,.docx,.doc,.txt" onchange="handleLuFileSelect(event)"/>
+          </div>
+          <div id="lu-pending" style="margin-top:0.5rem"></div>
+          <button class="btn btn-primary" id="lu-upload-btn" onclick="uploadLegalUpdate()" disabled>
+            Index into Legal Updates
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">📚</div>
+          <div><div class="card-title">Indexed Items</div><div class="card-desc">Legislation and case law currently searchable</div></div>
+        </div>
+        <div class="card-body" id="lu-list">
+          <div class="empty-state" style="padding:1.5rem">
+            <p style="font-size:0.82rem;color:var(--ink3)">No items uploaded yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+const API = '';  // relative — works on localhost and when hosted (frontend served by same app)
+let matters = [];
+let pendingFiles = [];
+let selectedMatterId = null;
+let currentAffidavit = '';
+let currentDocId = '';
+let precedentContext = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await loadMatters();
+  renderCalendar();
+  showTab('search');
+}
+
+async function loadMatters() {
+  try {
+    const res = await fetch(`${API}/api/matters`);
+    matters = await res.json();
+    populateMatterSelects();
+    renderMattersList();
+  } catch(e) { console.error('Could not load matters:', e); }
+}
+
+function populateMatterSelects() {
+  const selects = ['upload-matter-select','cal-matter'];
+  selects.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const val = el.value;
+    el.innerHTML = id === 'cal-matter'
+      ? '<option value="">— None —</option>'
+      : '<option value="">— Select existing matter —</option>';
+    matters.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name + (m.number ? ` — ${m.number}` : '');
+      el.appendChild(opt);
+    });
+    el.value = val;
+  });
+}
+
+// ── Tab Navigation ────────────────────────────────────────────────────────────
+function showTab(tab) {
+  ['vault','search','matters','affidavit','calendar','legalupdates'].forEach(t => {
+    document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
+    document.getElementById(`nav-${t}`).classList.toggle('active', t === tab);
+  });
+  if (tab === 'matters') renderMattersList();
+  if (tab === 'calendar') { renderCalendar(); loadReminderSettings(); }
+  if (tab === 'legalupdates') renderLegalUpdates();
+}
+
+// ── Matters ───────────────────────────────────────────────────────────────────
+async function createMatterFromVault() {
+  const name = document.getElementById('new-matter-name').value.trim();
+  if (!name) { showVaultStatus('Enter a matter name first.', 'error'); return; }
+  try {
+    const res = await fetch(`${API}/api/matters`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name,
+        number: document.getElementById('new-matter-number').value.trim() || null,
+        matter_type: document.getElementById('new-matter-type').value || null,
+      })
+    });
+    const m = await res.json();
+    matters.unshift(m);
+    populateMatterSelects();
+    document.getElementById('upload-matter-select').value = m.id;
+    selectedMatterId = m.id;
+    document.getElementById('new-matter-name').value = '';
+    document.getElementById('new-matter-number').value = '';
+    showVaultStatus(`Matter "${m.name}" created.`, 'success');
+  } catch(e) { showVaultStatus('Could not create matter.', 'error'); }
+}
+
+function onUploadMatterChange() {
+  selectedMatterId = document.getElementById('upload-matter-select').value || null;
+}
+
+function renderMattersList() {
+  const el = document.getElementById('matters-list');
+  if (!el) return;
+  if (!matters.length) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">📂</div><p>No matters yet. Upload documents to create your first matter.</p></div>';
+    return;
+  }
+  el.innerHTML = matters.map(m => `
+    <div class="matter-item">
+      <div class="matter-row" onclick="toggleMatter('${m.id}')">
+        <div class="matter-icon">📁</div>
+        <div class="matter-expand">
+          <div class="matter-name">${m.name}</div>
+          <div class="matter-meta">
+            ${m.number ? `<span class="chip chip-gray">${m.number}</span>` : ''}
+            ${m.matter_type ? `<span class="chip chip-green">${m.matter_type.replace(/_/g,' ')}</span>` : ''}
+            <span style="font-size:0.7rem;color:var(--ink3)">${m.document_count || 0} document${m.document_count !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+        <div class="matter-actions">
+          <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();deleteMatter('${m.id}')">🗑</button>
+          <span style="color:var(--ink3);font-size:0.8rem" id="expand-icon-${m.id}">▶</span>
+        </div>
+      </div>
+      <div class="matter-docs" id="matter-docs-${m.id}">
+        <div id="docs-content-${m.id}" style="font-size:0.8rem;color:var(--ink3)">Loading…</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function toggleMatter(id) {
+  const docsEl = document.getElementById(`matter-docs-${id}`);
+  const icon = document.getElementById(`expand-icon-${id}`);
+  const isOpen = docsEl.classList.contains('open');
+  docsEl.classList.toggle('open', !isOpen);
+  icon.textContent = isOpen ? '▶' : '▼';
+  if (!isOpen) {
+    try {
+      const res = await fetch(`${API}/api/matters/${id}/documents`);
+      const docs = await res.json();
+      const content = document.getElementById(`docs-content-${id}`);
+      if (!docs.length) {
+        content.innerHTML = '<p style="padding:0.5rem 0;color:var(--ink3)">No documents uploaded yet.</p>';
+      } else {
+        content.innerHTML = docs.map(d => `
+          <div class="doc-item">
+            <span>📄</span>
+            <div style="flex:1">
+              <div class="doc-name">${d.filename}</div>
+              <div class="doc-meta">
+                ${d.document_type ? `<span class="chip chip-gray">${d.document_type.replace(/_/g,' ')}</span>` : ''}
+                ${d.doc_date ? `<span class="chip chip-blue">${d.doc_date}</span>` : ''}
+                ${d.ocr_used ? `<span class="chip chip-gold">OCR scanned</span>` : ''}
+                <span class="chip ${d.status==='complete'?'chip-green':d.status==='error'?'chip-red':'chip-gold'}">${d.status}</span>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }
+    } catch(e) {}
+  }
+}
+
+async function deleteMatter(id) {
+  if (!confirm('Delete this matter and all its documents? This cannot be undone.')) return;
+  await fetch(`${API}/api/matters/${id}`, {method:'DELETE'});
+  matters = matters.filter(m => m.id !== id);
+  populateMatterSelects();
+  renderMattersList();
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+function handleDragOver(e) { e.preventDefault(); document.getElementById('upload-zone').classList.add('drag'); }
+function handleDragLeave(e) { document.getElementById('upload-zone').classList.remove('drag'); }
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-zone').classList.remove('drag');
+  addFiles([...e.dataTransfer.files]);
+}
+function handleFileSelect(e) { addFiles([...e.target.files]); }
+
+function addFiles(files) {
+  files.forEach(f => {
+    if (!pendingFiles.find(p => p.name === f.name)) pendingFiles.push(f);
+  });
+  renderPendingFiles();
+  document.getElementById('upload-btn').disabled = pendingFiles.length === 0;
+}
+
+function renderPendingFiles() {
+  const el = document.getElementById('upload-list');
+  el.innerHTML = pendingFiles.map((f, i) => `
+    <div class="upload-item">
+      <span>📄</span>
+      <span class="name">${f.name}</span>
+      <span style="font-size:0.7rem;color:var(--ink3)">${(f.size/1024).toFixed(0)} KB</span>
+      <button class="btn btn-sm" style="background:none;color:var(--ink3)" onclick="removePending(${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+function removePending(i) {
+  pendingFiles.splice(i, 1);
+  renderPendingFiles();
+  document.getElementById('upload-btn').disabled = pendingFiles.length === 0;
+}
+
+async function processUploads() {
+  const mid = document.getElementById('upload-matter-select').value || selectedMatterId;
+  if (!mid) { showVaultStatus('Select or create a matter before uploading.', 'error'); return; }
+  if (!pendingFiles.length) return;
+
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true;
+  showVaultStatus(`<span class="spinner"></span> Uploading and indexing ${pendingFiles.length} file(s)…`, 'loading');
+
+  let success = 0, failed = 0;
+  for (const file of pendingFiles) {
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('matter_id', mid);
+      const res = await fetch(`${API}/api/upload`, {method:'POST', body: fd});
+      if (res.ok) success++;
+      else failed++;
+    } catch(e) { failed++; }
+  }
+
+  pendingFiles = [];
+  renderPendingFiles();
+  btn.disabled = true;
+  await loadMatters();
+
+  const msg = failed > 0
+    ? `${success} indexed, ${failed} failed.`
+    : `${success} document${success !== 1 ? 's' : ''} indexed successfully.`;
+  showVaultStatus(`✓ ${msg}`, 'success');
+}
+
+function showVaultStatus(msg, type) {
+  const el = document.getElementById('vault-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+async function doSearch() {
+  const query = document.getElementById('search-query').value.trim();
+  if (!query) return;
+
+  document.getElementById('search-empty').style.display = 'none';
+  document.getElementById('search-results').innerHTML = '';
+  document.getElementById('search-loading').style.display = 'block';
+  document.getElementById('search-btn').disabled = true;
+
+  try {
+    const res = await fetch(`${API}/api/search`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        query,
+        matter_type: document.getElementById('filter-matter-type').value || null,
+        document_type: document.getElementById('filter-doc-type').value || null,
+        limit: 8,
+      })
+    });
+    const data = await res.json();
+    renderSearchResults(data, query);
+  } catch(e) {
+    document.getElementById('search-results').innerHTML = `<div class="status show error">Search failed: ${e.message}. Is the server running?</div>`;
+  } finally {
+    document.getElementById('search-loading').style.display = 'none';
+    document.getElementById('search-btn').disabled = false;
+  }
+}
+
+function renderSearchResults(data, query) {
+  const el = document.getElementById('search-results');
+  if (!data.results.length && !data.answer) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>${data.message || 'No results found.'}</p></div>`;
+    return;
+  }
+
+  let html = '';
+
+  if (data.answer) {
+    html += `<div class="ai-answer">
+      <div class="ai-answer-label">⚡ AI Analysis</div>
+      <div class="ai-answer-text">${escHtml(data.answer)}</div>
+    </div>`;
+  }
+
+  // Group by document
+  const grouped = {};
+  data.results.forEach(r => {
+    if (!grouped[r.document_id]) grouped[r.document_id] = [];
+    grouped[r.document_id].push(r);
+  });
+
+  const docCount = Object.keys(grouped).length;
+  html += `<p style="font-size:0.75rem;color:var(--ink3);margin-bottom:0.75rem">${docCount} document${docCount!==1?'s':''} · ${data.results.length} excerpt${data.results.length!==1?'s':''} for "${escHtml(query)}"</p>`;
+
+  Object.entries(grouped).forEach(([docId, chunks]) => {
+    const first = chunks[0];
+    const topScore = Math.max(...chunks.map(c => c.similarity));
+
+    if (first.result_source === 'legal_update') {
+      const isLegislation = first.source_type === 'legislation';
+      html += `<div class="search-result" style="border-left:3px solid ${isLegislation ? 'var(--gold2)' : 'var(--blue)'}">
+        <div class="sr-header">
+          <div style="font-size:1.2rem">${isLegislation ? '📜' : '⚖'}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:0.88rem">${escHtml(first.reference || first.filename)}</div>
+            <div style="font-size:0.72rem;color:var(--ink3);margin-top:2px">${escHtml(first.filename)}</div>
+            <div style="margin-top:5px">
+              <span class="chip ${isLegislation ? 'chip-gold' : 'chip-blue'}">${isLegislation ? 'Legislation' : 'Case Law'}</span>
+              <span class="chip chip-gray">${escHtml(first.source_name || 'ZimLII')} · CC BY-NC</span>
+              ${first.doc_date ? `<span class="chip chip-blue">${first.doc_date}</span>` : ''}
+              ${first.court ? `<span class="chip chip-green">${escHtml(first.court)}</span>` : ''}
+            </div>
+          </div>
+          <span class="sr-score">${Math.round(topScore*100)}% match</span>
+        </div>
+        <div class="sr-body">
+          <div class="sr-excerpt">${escHtml(chunks[0].text.slice(0,400))}${chunks[0].text.length > 400 ? '…' : ''}</div>
+          <div style="font-size:0.7rem;color:var(--ink3)">${chunks.length} excerpt${chunks.length!==1?'s':''} · Public legal source</div>
+        </div>
+      </div>`;
+      return;
+    }
+
+    const precedentJson = JSON.stringify({
+      text: chunks.map(c => c.text).join('\n\n'),
+      filename: first.filename,
+      matter_name: first.matter_name,
+    }).replace(/'/g, "\\'");
+
+    html += `<div class="search-result">
+      <div class="sr-header">
+        <div style="font-size:1.2rem">📄</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:0.88rem">${escHtml(first.filename)}</div>
+          <div style="font-size:0.72rem;color:var(--ink3);margin-top:2px">
+            <span class="chip chip-green" style="margin-right:6px">Firm Precedent</span>
+            ${escHtml(first.matter_name)}${first.matter_number ? ` — ${first.matter_number}` : ''}
+          </div>
+          <div style="margin-top:5px">
+            ${first.document_type ? `<span class="chip chip-gray">${first.document_type.replace(/_/g,' ')}</span>` : ''}
+            ${first.doc_date ? `<span class="chip chip-blue">${first.doc_date}</span>` : ''}
+            ${first.court ? `<span class="chip chip-green">${escHtml(first.court)}</span>` : ''}
+          </div>
+        </div>
+        <span class="sr-score">${Math.round(topScore*100)}% match</span>
+      </div>
+      <div class="sr-body">
+        <div class="sr-excerpt">${escHtml(chunks[0].text.slice(0,400))}${chunks[0].text.length > 400 ? '…' : ''}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:0.72rem;color:var(--ink3)">${chunks.length} excerpt${chunks.length!==1?'s':''}</span>
+          <button class="btn btn-sm btn-outline" onclick="usePrecedent(${escHtml(JSON.stringify(precedentJson))})">
+            📎 Use as precedent
+          </button>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
+}
+
+function usePrecedent(jsonStr) {
+  try {
+    const ctx = JSON.parse(jsonStr);
+    precedentContext = ctx;
+    document.getElementById('precedent-banner').style.display = 'block';
+    document.getElementById('precedent-filename').textContent = ctx.filename + ' — ' + ctx.matter_name;
+    showTab('affidavit');
+  } catch(e) { console.error(e); }
+}
+
+function clearPrecedent() {
+  precedentContext = null;
+  document.getElementById('precedent-banner').style.display = 'none';
+}
+
+// ── Affidavit ─────────────────────────────────────────────────────────────────
+async function generateAffidavit() {
+  const summary = document.getElementById('aff-summary').value.trim();
+  if (!summary) { showAffStatus('Matter summary is required.', 'error'); return; }
+
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Drafting affidavit…';
+  showAffStatus('AI is drafting your affidavit. This takes 10–20 seconds…', 'loading');
+  document.getElementById('aff-placeholder').style.display = 'none';
+  document.getElementById('aff-result').style.display = 'none';
+
+  try {
+    const res = await fetch(`${API}/api/generate-affidavit`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        matter_type: document.getElementById('aff-type').value || null,
+        court: document.getElementById('aff-court').value,
+        deponent_name: document.getElementById('aff-name').value.trim() || null,
+        deponent_id: document.getElementById('aff-id').value.trim() || null,
+        deponent_capacity: document.getElementById('aff-capacity').value.trim() || null,
+        parties: document.getElementById('aff-parties').value.trim() || null,
+        matter_summary: summary,
+        key_facts: document.getElementById('aff-facts').value.trim() || null,
+        relief: document.getElementById('aff-relief').value.trim() || null,
+        precedent_context: precedentContext,
+      })
+    });
+
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Generation failed'); }
+    const data = await res.json();
+
+    currentAffidavit = data.affidavit;
+    currentDocId = data.document_id;
+
+    document.getElementById('aff-text').textContent = currentAffidavit;
+    document.getElementById('aff-docid').textContent = `Document ID: ${currentDocId}`;
+    document.getElementById('aff-result').style.display = 'block';
+    showAffStatus('✓ Affidavit drafted. Edit directly in the text area before downloading.', 'success');
+  } catch(e) {
+    document.getElementById('aff-placeholder').style.display = 'block';
+    showAffStatus(`Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '⚖ Generate Affidavit';
+  }
+}
+
+function showAffStatus(msg, type) {
+  const el = document.getElementById('aff-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+async function downloadDocx() {
+  const text = document.getElementById('aff-text').textContent;
+  if (!text) return;
+  const name = document.getElementById('aff-name').value.trim() || 'Deponent';
+
+  showAffStatus('<span class="spinner"></span> Generating .docx file…', 'loading');
+
+  try {
+    const res = await fetch(`${API}/api/export-docx`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ affidavit_text: text, deponent_name: name, document_id: currentDocId })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Affidavit_${name.replace(/\s+/g,'_')}.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showAffStatus('✓ Downloaded successfully.', 'success');
+  } catch(e) {
+    showAffStatus(`Download error: ${e.message}`, 'error');
+  }
+}
+
+function copyAffidavit() {
+  const text = document.getElementById('aff-text').textContent;
+  navigator.clipboard.writeText(text).then(() => showAffStatus('✓ Copied to clipboard.', 'success'));
+}
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+let calEvents = [];
+
+async function renderCalendar() {
+  try {
+    const res = await fetch(`${API}/api/calendar`);
+    calEvents = await res.json();
+  } catch(e) { calEvents = []; }
+
+  const today = new Date().toISOString().slice(0,10);
+  const upcoming = calEvents.filter(e => e.date >= today).slice(0,10);
+  const all = calEvents;
+
+  // Badge
+  const badge = document.getElementById('cal-badge');
+  const urgentCount = upcoming.filter(e => {
+    const days = (new Date(e.date) - new Date()) / 86400000;
+    return days <= 3;
+  }).length;
+  badge.textContent = urgentCount;
+  badge.style.display = urgentCount > 0 ? 'inline' : 'none';
+
+  renderEventList('cal-upcoming', upcoming, true);
+  renderEventList('cal-all', all, false);
+}
+
+function renderEventList(elId, events, showEmpty) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!events.length) {
+    el.innerHTML = showEmpty
+      ? '<div class="empty-state"><div class="icon">📅</div><p>No upcoming events.</p></div>'
+      : '<div class="empty-state" style="padding:1.5rem"><p style="font-size:0.82rem;color:var(--ink3)">No events recorded yet.</p></div>';
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0,10);
+  el.innerHTML = events.map(e => {
+    const d = new Date(e.date + 'T12:00:00');
+    const day = d.getDate();
+    const month = d.toLocaleString('en-GB', {month:'short'}).toUpperCase();
+    const days = Math.round((d - new Date()) / 86400000);
+    const isUrgent = days >= 0 && days <= 3;
+    const isPast = e.date < today;
+    const typeClass = `event-type-${e.event_type}`;
+
+    const daysLabel = isPast
+      ? `<span class="chip chip-gray">Past</span>`
+      : days === 0
+        ? `<span class="chip chip-red">TODAY</span>`
+        : days === 1
+          ? `<span class="chip chip-red">Tomorrow</span>`
+          : days <= 3
+            ? `<span class="chip chip-gold">${days} days</span>`
+            : `<span class="chip chip-gray">In ${days} days</span>`;
+
+    return `<div class="cal-event ${typeClass} ${isUrgent && !isPast ? 'urgent' : ''}" style="${isPast?'opacity:0.6':''}">
+      <div class="cal-date-block" style="${isPast?'background:var(--ink3)':''}">
+        <div class="cal-day">${day}</div>
+        <div class="cal-month">${month}</div>
+      </div>
+      <div class="cal-details">
+        <div class="cal-title">${escHtml(e.title)}</div>
+        <div class="cal-meta">
+          ${e.time ? `<strong>${e.time}</strong> · ` : ''}
+          ${e.court ? `${escHtml(e.court)} · ` : ''}
+          ${e.matter_name ? `${escHtml(e.matter_name)} · ` : ''}
+          ${daysLabel}
+        </div>
+        ${e.notes ? `<div style="font-size:0.72rem;color:var(--ink3);margin-top:3px">${escHtml(e.notes)}</div>` : ''}
+      </div>
+      <button class="btn btn-sm" style="background:none;color:var(--ink3);flex-shrink:0" onclick="deleteEvent('${e.id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function addCalendarEvent() {
+  const title = document.getElementById('cal-title').value.trim();
+  const date = document.getElementById('cal-date').value;
+  if (!title || !date) { showCalStatus('Title and date are required.', 'error'); return; }
+
+  const matterSel = document.getElementById('cal-matter');
+  const matterId = matterSel.value || null;
+  const matterName = matterId ? matterSel.options[matterSel.selectedIndex].text : null;
+
+  try {
+    const res = await fetch(`${API}/api/calendar`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        title,
+        matter_id: matterId,
+        matter_name: matterName,
+        event_type: document.getElementById('cal-type').value,
+        date,
+        time: document.getElementById('cal-time').value || null,
+        court: document.getElementById('cal-court').value.trim() || null,
+        notes: document.getElementById('cal-notes').value.trim() || null,
+      })
+    });
+    if (!res.ok) throw new Error('Failed');
+    document.getElementById('cal-title').value = '';
+    document.getElementById('cal-date').value = '';
+    document.getElementById('cal-time').value = '';
+    document.getElementById('cal-court').value = '';
+    document.getElementById('cal-notes').value = '';
+    await renderCalendar();
+    showCalStatus('✓ Event added.', 'success');
+  } catch(e) { showCalStatus('Could not save event.', 'error'); }
+}
+
+async function deleteEvent(id) {
+  await fetch(`${API}/api/calendar/${id}`, {method:'DELETE'});
+  await renderCalendar();
+}
+
+function showCalStatus(msg, type) {
+  const el = document.getElementById('cal-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Email Reminders ──────────────────────────────────────────────────────────
+async function loadReminderSettings() {
+  try {
+    const res = await fetch(`${API}/api/reminders/settings`);
+    const s = await res.json();
+    document.getElementById('reminder-email').value = s.recipient_email || '';
+    document.getElementById('reminder-hour').value = String(s.send_hour_utc ?? 5);
+    document.getElementById('reminder-enabled').value = s.enabled ? 'true' : 'false';
+    document.getElementById('reminder-smtp-warning').style.display = s.smtp_configured ? 'none' : 'block';
+  } catch(e) {}
+}
+
+async function saveReminderSettings() {
+  const email = document.getElementById('reminder-email').value.trim();
+  const enabled = document.getElementById('reminder-enabled').value === 'true';
+  const hour = parseInt(document.getElementById('reminder-hour').value, 10);
+
+  if (enabled && !email) {
+    showReminderStatus('Enter a recipient email to enable reminders.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/api/reminders/settings`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ enabled, recipient_email: email || 'none@none.com', send_hour_utc: hour })
+    });
+    if (!res.ok) throw new Error('Failed to save');
+    showReminderStatus('✓ Reminder settings saved.', 'success');
+  } catch(e) {
+    showReminderStatus('Could not save settings.', 'error');
+  }
+}
+
+async function sendTestReminder() {
+  const email = document.getElementById('reminder-email').value.trim();
+  if (!email) { showReminderStatus('Enter and save a recipient email first.', 'error'); return; }
+
+  showReminderStatus('<span class="spinner"></span> Sending test email…', 'loading');
+  try {
+    // Save first so the test goes to the right address
+    await fetch(`${API}/api/reminders/settings`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        enabled: document.getElementById('reminder-enabled').value === 'true',
+        recipient_email: email,
+        send_hour_utc: parseInt(document.getElementById('reminder-hour').value, 10),
+      })
+    });
+
+    const res = await fetch(`${API}/api/reminders/send-test`, {method:'POST'});
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Failed'); }
+    const data = await res.json();
+    showReminderStatus(`✓ Test email sent to ${email} (${data.event_count} upcoming event${data.event_count!==1?'s':''}).`, 'success');
+  } catch(e) {
+    showReminderStatus(`Could not send: ${e.message}`, 'error');
+  }
+}
+
+function showReminderStatus(msg, type) {
+  const el = document.getElementById('reminder-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Legal Updates ─────────────────────────────────────────────────────────────
+let luPendingFile = null;
+
+function handleLuDrop(e) {
+  e.preventDefault();
+  document.getElementById('lu-upload-zone').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) setLuFile(f);
+}
+function handleLuFileSelect(e) {
+  const f = e.target.files[0];
+  if (f) setLuFile(f);
+}
+function setLuFile(file) {
+  luPendingFile = file;
+  document.getElementById('lu-pending').innerHTML = `
+    <div class="upload-item">
+      <span>📜</span>
+      <span class="name">${escHtml(file.name)}</span>
+      <span style="font-size:0.7rem;color:var(--ink3)">${(file.size/1024).toFixed(0)} KB</span>
+      <button class="btn btn-sm" style="background:none;color:var(--ink3)" onclick="luPendingFile=null;document.getElementById('lu-pending').innerHTML='';document.getElementById('lu-upload-btn').disabled=true">✕</button>
+    </div>`;
+  document.getElementById('lu-upload-btn').disabled = false;
+}
+
+async function uploadLegalUpdate() {
+  if (!luPendingFile) return;
+  const btn = document.getElementById('lu-upload-btn');
+  btn.disabled = true;
+  showLuStatus('<span class="spinner"></span> Uploading and indexing…', 'loading');
+
+  try {
+    const fd = new FormData();
+    fd.append('file', luPendingFile);
+    fd.append('source_type', document.getElementById('lu-source-type').value);
+    fd.append('source_name', document.getElementById('lu-source-name').value);
+    const ref = document.getElementById('lu-reference').value.trim();
+    if (ref) fd.append('reference', ref);
+
+    const res = await fetch(`${API}/api/legal-updates/upload`, {method:'POST', body: fd});
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Upload failed'); }
+    const item = await res.json();
+
+    luPendingFile = null;
+    document.getElementById('lu-pending').innerHTML = '';
+    document.getElementById('lu-reference').value = '';
+    showLuStatus(`✓ "${item.filename}" indexed (${item.chunk_count} chunks).`, 'success');
+    await renderLegalUpdates();
+  } catch(e) {
+    showLuStatus(`Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = true;
+  }
+}
+
+function showLuStatus(msg, type) {
+  const el = document.getElementById('lu-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+async function renderLegalUpdates() {
+  const el = document.getElementById('lu-list');
+  try {
+    const res = await fetch(`${API}/api/legal-updates`);
+    const items = await res.json();
+    if (!items.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:1.5rem"><p style="font-size:0.82rem;color:var(--ink3)">No items uploaded yet.</p></div>';
+      return;
+    }
+    el.innerHTML = items.map(item => `
+      <div class="doc-item" style="align-items:flex-start">
+        <span style="margin-top:2px">${item.source_type === 'legislation' ? '📜' : '⚖'}</span>
+        <div style="flex:1">
+          <div class="doc-name">${escHtml(item.filename)}</div>
+          <div class="doc-meta" style="margin-top:3px">
+            <span class="chip ${item.source_type === 'legislation' ? 'chip-gold' : 'chip-blue'}">${item.source_type === 'legislation' ? 'Legislation' : 'Case Law'}</span>
+            <span class="chip chip-gray">${escHtml(item.source_name)}</span>
+            ${item.reference ? `<span class="chip chip-green">${escHtml(item.reference)}</span>` : ''}
+            ${item.doc_date ? `<span class="chip chip-blue">${item.doc_date}</span>` : ''}
+            ${item.ocr_used ? `<span class="chip chip-gold">OCR scanned</span>` : ''}
+            <span class="chip ${item.status==='complete'?'chip-green':item.status==='error'?'chip-red':'chip-gold'}">${item.status}</span>
+          </div>
+        </div>
+        <button class="btn btn-sm" style="background:none;color:var(--ink3)" onclick="deleteLegalUpdate('${item.id}')">🗑</button>
+      </div>
+    `).join('');
+  } catch(e) {
+    el.innerHTML = '<p style="font-size:0.8rem;color:var(--ink3)">Could not load items.</p>';
+  }
+}
+
+async function deleteLegalUpdate(id) {
+  await fetch(`${API}/api/legal-updates/${id}`, {method:'DELETE'});
+  renderLegalUpdates();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

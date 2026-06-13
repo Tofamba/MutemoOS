@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.local
+
+# Persisted application data (documents, matters, calendar — stays local)
+data/
+
+# Node (if frontend build tooling added later)
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temp files generated at runtime
+*.docx
+!Mutemo_Desk_Briefing_for_Nyari.docx
+*.txt
