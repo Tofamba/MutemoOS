@@ -4,6 +4,57 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Mutemo Desk — Zimbabwe Legal Practice</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tiptap/2.1.12/tiptap.umd.min.js" defer></script>
+<style>
+/* TipTap editor styles */
+.tiptap-editor {
+  min-height: 500px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1.5rem 2rem;
+  font-family: 'Times New Roman', serif;
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: var(--ink);
+  outline: none;
+}
+.tiptap-editor:focus { border-color: var(--green); box-shadow: 0 0 0 2px rgba(27,77,46,0.1); }
+.tiptap-editor p { margin-bottom: 0.75rem; }
+.tiptap-editor h1 { font-size: 1.2rem; font-weight: 700; text-align: center; margin: 1rem 0; color: var(--ink); }
+.tiptap-editor h2 { font-size: 1rem; font-weight: 700; margin: 0.75rem 0 0.4rem; color: var(--ink); }
+.tiptap-editor ol { padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.tiptap-editor ul { padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.tiptap-editor li { margin-bottom: 0.3rem; }
+.tiptap-editor table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.tiptap-editor td, .tiptap-editor th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
+.tiptap-editor blockquote { border-left: 3px solid var(--gold); padding-left: 1rem; margin: 0.75rem 0; color: var(--ink2); }
+.tiptap-editor strong { font-weight: 700; }
+.tiptap-editor em { font-style: italic; }
+.tiptap-editor u { text-decoration: underline; }
+.tiptap-editor [style*="text-align: center"] { text-align: center; }
+.tiptap-editor [style*="text-align: right"] { text-align: right; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 0.5rem; background: var(--paper2); border: 1px solid var(--border); border-bottom: none; border-radius: 4px 4px 0 0; }
+.toolbar .tbar-btn { background: white; border: 1px solid var(--border); border-radius: 3px; padding: 3px 7px; cursor: pointer; font-size: 0.8rem; font-family: 'Georgia', serif; color: var(--ink2); transition: all 0.1s; min-width: 28px; text-align: center; }
+.toolbar .tbar-btn:hover { background: var(--paper3); border-color: var(--ink3); }
+.toolbar .tbar-btn.active { background: var(--green); color: white; border-color: var(--green); }
+.toolbar .tbar-sep { width: 1px; background: var(--border); margin: 2px 2px; }
+.doc-type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
+.doc-type-btn { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.65rem 0.85rem; cursor: pointer; text-align: left; transition: all 0.15s; }
+.doc-type-btn:hover { border-color: var(--green); background: var(--paper); }
+.doc-type-btn.selected { border-color: var(--green); background: #e8f2ec; }
+.doc-type-btn .dt-icon { font-size: 1.1rem; margin-bottom: 3px; }
+.doc-type-btn .dt-name { font-size: 0.78rem; font-weight: 700; color: var(--ink); display: block; }
+.doc-type-btn .dt-desc { font-size: 0.68rem; color: var(--ink3); margin-top: 1px; display: block; }
+@media print {
+  .header, .nav, .btn, .toolbar, .card, .section-head, #tab-draft > *:not(#print-area) { display: none !important; }
+  #print-area { display: block !important; padding: 0; margin: 0; }
+  .tiptap-editor { border: none; padding: 0; max-height: none; font-size: 12pt; }
+  body { background: white; }
+}
+</style>
 <style>
 /* ── Reset & Base ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -190,8 +241,10 @@ select{cursor:pointer}
   <button class="nav-btn active" id="nav-search" onclick="showTab('search')">🔍 Search Vault</button>
   <button class="nav-btn" id="nav-matters" onclick="showTab('matters')">📂 Matters</button>
   <button class="nav-btn" id="nav-affidavit" onclick="showTab('affidavit')">📄 Draft Affidavit</button>
+  <button class="nav-btn" id="nav-draft" onclick="showTab('draft')">✍ Draft Document</button>
   <button class="nav-btn" id="nav-calendar" onclick="showTab('calendar')">📅 Court Calendar <span class="nav-badge" id="cal-badge" style="display:none">0</span></button>
   <button class="nav-btn" id="nav-legalupdates" onclick="showTab('legalupdates')">⚖ Legal Updates</button>
+  <button class="nav-btn" id="nav-zlr" onclick="showTab('zlr')">📚 Case Law Index</button>
 </nav>
 
 <main class="main">
@@ -652,6 +705,357 @@ select{cursor:pointer}
   </div>
 </div>
 
+<!-- ═══════════════ DRAFT DOCUMENT TAB ═══════════════ -->
+<div id="tab-draft" style="display:none">
+  <div class="section-head">
+    <h2>✍ Draft Document</h2>
+    <p>AI drafts any Zimbabwe legal document. Select a type or describe what you need, edit in the rich text editor, then export to Word or PDF.</p>
+  </div>
+
+  <!-- Step 1: Document type selection -->
+  <div class="card" id="draft-step1">
+    <div class="card-header">
+      <div class="card-icon">📋</div>
+      <div><div class="card-title">Step 1 — Choose Document Type</div><div class="card-desc">Select a template or use freeform for any other document</div></div>
+    </div>
+    <div class="card-body">
+      <div class="doc-type-grid" id="doc-type-grid">
+        <button class="doc-type-btn" onclick="selectDocType('summons_matrimonial')" id="dt-summons_matrimonial">
+          <div class="dt-icon">⚖</div><span class="dt-name">Matrimonial Summons</span><span class="dt-desc">Divorce, custody, maintenance</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('summons_civil')" id="dt-summons_civil">
+          <div class="dt-icon">📋</div><span class="dt-name">Civil Summons</span><span class="dt-desc">General civil proceedings</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('court_application')" id="dt-court_application">
+          <div class="dt-icon">🏛</div><span class="dt-name">Court Application</span><span class="dt-desc">Notice of motion & draft order</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('urgent_chamber')" id="dt-urgent_chamber">
+          <div class="dt-icon">⚡</div><span class="dt-name">Urgent Chamber Application</span><span class="dt-desc">Urgent relief, certificate of urgency</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('notice_of_appeal')" id="dt-notice_of_appeal">
+          <div class="dt-icon">📤</div><span class="dt-name">Notice of Appeal</span><span class="dt-desc">High Court, Supreme Court</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('letter_of_demand')" id="dt-letter_of_demand">
+          <div class="dt-icon">✉</div><span class="dt-name">Letter of Demand</span><span class="dt-desc">Formal demand before action</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('review')" id="dt-review">
+          <div class="dt-icon">🔍</div><span class="dt-name">Application for Review</span><span class="dt-desc">Judicial review of decisions</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('heads_of_argument')" id="dt-heads_of_argument">
+          <div class="dt-icon">📑</div><span class="dt-name">Heads of Argument</span><span class="dt-desc">Structured legal argument</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('legal_opinion')" id="dt-legal_opinion">
+          <div class="dt-icon">💡</div><span class="dt-name">Legal Opinion</span><span class="dt-desc">Formal written opinion</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('client_letter')" id="dt-client_letter">
+          <div class="dt-icon">📧</div><span class="dt-name">Client Letter</span><span class="dt-desc">Formal correspondence</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('agreement')" id="dt-agreement">
+          <div class="dt-icon">🤝</div><span class="dt-name">Agreement / Contract</span><span class="dt-desc">Commercial, lease, settlement</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('joint_venture')" id="dt-joint_venture">
+          <div class="dt-icon">🏢</div><span class="dt-name">Joint Venture / Shareholders</span><span class="dt-desc">COBE Act, shareholding structure</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('agreement_of_sale')" id="dt-agreement_of_sale">
+          <div class="dt-icon">🏠</div><span class="dt-name">Agreement of Sale</span><span class="dt-desc">Immoveable property — Deeds Registry</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('acknowledgement_of_debt')" id="dt-acknowledgement_of_debt">
+          <div class="dt-icon">📜</div><span class="dt-name">Acknowledgement of Debt</span><span class="dt-desc">Liquid document, consent to judgment</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('power_of_attorney_transfer')" id="dt-power_of_attorney_transfer">
+          <div class="dt-icon">🔑</div><span class="dt-name">Power of Attorney — Transfer</span><span class="dt-desc">Conveyancing, Deeds Registry</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('declaration_transferor')" id="dt-declaration_transferor">
+          <div class="dt-icon">📋</div><span class="dt-name">Declaration by Transferor</span><span class="dt-desc">Seller declaration — Deeds Registry</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('declaration_transferee')" id="dt-declaration_transferee">
+          <div class="dt-icon">📋</div><span class="dt-name">Declaration by Transferee</span><span class="dt-desc">Buyer declaration — Deeds Registry</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('special_power_of_attorney')" id="dt-special_power_of_attorney">
+          <div class="dt-icon">✍</div><span class="dt-name">Special Power of Attorney</span><span class="dt-desc">Limited, transaction-specific authority</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('sale_of_business')" id="dt-sale_of_business">
+          <div class="dt-icon">🏪</div><span class="dt-name">Sale of Business Agreement</span><span class="dt-desc">Goodwill, assets, employees, restraint</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('memorandum_of_understanding')" id="dt-memorandum_of_understanding">
+          <div class="dt-icon">🤝</div><span class="dt-name">Memorandum of Understanding</span><span class="dt-desc">Binding / non-binding, pre-agreement</span>
+        </button>
+        <button class="doc-type-btn" onclick="selectDocType('freeform')" id="dt-freeform">
+          <div class="dt-icon">✍</div><span class="dt-name">Other / Freeform</span><span class="dt-desc">Describe any document</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Document details form -->
+  <div class="card" id="draft-step2" style="display:none">
+    <div class="card-header">
+      <div class="card-icon">📝</div>
+      <div><div class="card-title" id="draft-form-title">Step 2 — Document Details</div><div class="card-desc">Fill in the key details — AI handles the drafting</div></div>
+    </div>
+    <div class="card-body">
+      <div id="draft-status" class="status"></div>
+
+      <!-- Precedent context banner -->
+      <div id="draft-precedent-banner" style="display:none;background:#fdf6e8;border:1px solid var(--gold);border-radius:4px;padding:0.65rem 0.85rem;margin-bottom:0.75rem;display:none;align-items:center;gap:8px">
+        <span>📎</span>
+        <div style="flex:1;font-size:0.78rem"><strong style="color:var(--gold)">Precedent loaded:</strong> <span id="draft-precedent-name"></span></div>
+        <button class="btn btn-sm btn-outline" onclick="clearDraftPrecedent()">Clear</button>
+      </div>
+
+      <!-- Common fields -->
+      <div class="form-section">
+        <div class="form-section-label">Parties</div>
+        <div class="form-row">
+          <div class="form-group"><label>Plaintiff / Applicant</label><input type="text" id="draft-plaintiff" placeholder="e.g. MARY CHIGUMBA"/></div>
+          <div class="form-group"><label>Defendant / Respondent</label><input type="text" id="draft-defendant" placeholder="e.g. JOHN CHIGUMBA"/></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Court</label>
+            <select id="draft-court">
+              <option>High Court of Zimbabwe</option>
+              <option>Supreme Court of Zimbabwe</option>
+              <option>Constitutional Court of Zimbabwe</option>
+              <option>Magistrates Court, Harare</option>
+              <option>Magistrates Court, Bulawayo</option>
+              <option>Labour Court of Zimbabwe</option>
+              <option>Administrative Court</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Case / Matter Number</label><input type="text" id="draft-casenumber" placeholder="e.g. HC 1234/26 or leave blank"/></div>
+        </div>
+      </div>
+
+      <!-- Dynamic fields based on doc type -->
+      <div class="form-section" id="draft-dynamic-fields"></div>
+
+      <!-- Always present: key facts and instructions -->
+      <div class="form-section">
+        <div class="form-section-label">Key Facts &amp; Instructions</div>
+        <div class="form-group">
+          <label>Describe the facts, background, and what the document must achieve *</label>
+          <textarea id="draft-facts" rows="6" placeholder="Describe in plain language what happened, what is needed, and any specific points the document must cover. The AI will structure and draft accordingly."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Additional instructions (optional)</label>
+          <input type="text" id="draft-instructions" placeholder="e.g. Emphasise urgency · Include prayer for costs · Use formal tone"/>
+        </div>
+        <div class="form-group">
+          <label>Load precedent from vault (optional)</label>
+          <select id="draft-precedent-select" onchange="loadDraftPrecedent()">
+            <option value="">— No precedent —</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:0.5rem">
+        <button class="btn btn-outline" onclick="resetDraftTab()" style="margin-top:0.5rem">← Change type</button>
+        <button class="btn btn-primary" onclick="generateDocument()" id="draft-gen-btn" style="margin-top:0.5rem">✍ Draft Document</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Editor -->
+  <div id="draft-step3" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+      <h3 style="font-size:0.95rem;color:var(--ink2)" id="draft-editor-title">Drafted Document</h3>
+      <div style="display:flex;gap:0.5rem">
+        <button class="btn btn-outline btn-sm" onclick="resetDraftTab()">← New document</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadDraftDocx()">⬇ Download .docx</button>
+        <button class="btn btn-gold btn-sm" onclick="printDraft()">🖨 Print / Save PDF</button>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar" id="draft-toolbar">
+      <button class="tbar-btn" onclick="fmtDoc('bold')" title="Bold"><strong>B</strong></button>
+      <button class="tbar-btn" onclick="fmtDoc('italic')" title="Italic"><em>I</em></button>
+      <button class="tbar-btn" onclick="fmtDoc('underline')" title="Underline"><u>U</u></button>
+      <div class="tbar-sep"></div>
+      <button class="tbar-btn" onclick="fmtDoc('justifyLeft')" title="Left">⬅</button>
+      <button class="tbar-btn" onclick="fmtDoc('justifyCenter')" title="Centre">↔</button>
+      <button class="tbar-btn" onclick="fmtDoc('justifyRight')" title="Right">➡</button>
+      <button class="tbar-btn" onclick="fmtDoc('justifyFull')" title="Justify">☰</button>
+      <div class="tbar-sep"></div>
+      <button class="tbar-btn" onclick="fmtDoc('insertOrderedList')" title="Numbered list">1.</button>
+      <button class="tbar-btn" onclick="fmtDoc('insertUnorderedList')" title="Bullet list">•</button>
+      <div class="tbar-sep"></div>
+      <select onchange="fmtDoc('formatBlock', this.value); this.value=''" style="font-size:0.75rem;padding:2px 4px;border:1px solid var(--border);border-radius:3px;background:white">
+        <option value="">Paragraph style</option>
+        <option value="h1">Heading 1</option>
+        <option value="h2">Heading 2</option>
+        <option value="p">Normal</option>
+      </select>
+      <div class="tbar-sep"></div>
+      <select onchange="changeFontSize(this.value); this.value=''" style="font-size:0.75rem;padding:2px 4px;border:1px solid var(--border);border-radius:3px;background:white">
+        <option value="">Font size</option>
+        <option value="10pt">10pt</option>
+        <option value="11pt">11pt</option>
+        <option value="12pt">12pt</option>
+        <option value="14pt">14pt</option>
+      </select>
+      <div class="tbar-sep"></div>
+      <button class="tbar-btn" onclick="fmtDoc('undo')" title="Undo">↩</button>
+      <button class="tbar-btn" onclick="fmtDoc('redo')" title="Redo">↪</button>
+    </div>
+
+    <!-- Editor -->
+    <div id="print-area">
+      <div id="draft-editor" class="tiptap-editor" contenteditable="true" spellcheck="true"></div>
+    </div>
+
+    <div style="font-size:0.7rem;color:var(--ink3);margin-top:0.4rem;text-align:right" id="draft-wordcount"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ ZLR INDEX TAB ═══════════════ -->
+<div id="tab-zlr" style="display:none">
+  <div class="section-head">
+    <h2>📚 Comparative Law Index</h2>
+    <p>Upload headnotes and judgments from Zimbabwe, South Africa, and English law reports — ZLR, ZimLII, SAFLII, BAILII, All England, and more. Each case is classified by jurisdiction, authority weight, and subject category.</p>
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">⬆</div>
+          <div><div class="card-title">Upload Case</div><div class="card-desc">ZLR &middot; SAFLII &middot; BAILII &middot; All England &middot; any jurisdiction</div></div>
+        </div>
+        <div class="card-body">
+          <div id="zlr-status" class="status"></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Source</label>
+              <select id="zlr-source">
+                <optgroup label="Zimbabwe">
+                  <option value="ZimLII">ZimLII (downloaded PDF or text)</option>
+                  <option value="ZLR">Zimbabwe Law Reports — physical volume</option>
+                  <option value="ZLR-Rhodesia">Rhodesian Law Reports — physical volume</option>
+                </optgroup>
+                <optgroup label="South Africa">
+                  <option value="SAFLII">SAFLII (downloaded PDF or text)</option>
+                  <option value="SALR">South African Law Reports — physical volume</option>
+                  <option value="SACR">SA Criminal Law Reports — physical volume</option>
+                  <option value="BCLR">Butterworths Constitutional LR — physical volume</option>
+                </optgroup>
+                <optgroup label="England & Wales">
+                  <option value="BAILII">BAILII (downloaded PDF or text)</option>
+                  <option value="AllER">All England Law Reports — physical volume</option>
+                  <option value="WLR">Weekly Law Reports — physical volume</option>
+                  <option value="AC">Law Reports (AC/QB/Ch) — physical volume</option>
+                </optgroup>
+                <optgroup label="Other">
+                  <option value="Privy Council">Privy Council (JCPC)</option>
+                  <option value="Other">Other jurisdiction</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Volume / Year (optional)</label>
+              <input type="text" id="zlr-volume" placeholder="e.g. 2014 (1) or 1987 (2)"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>ZimLII URL (optional — paste link to the judgment)</label>
+            <input type="text" id="zlr-url" placeholder="https://zimlii.org/judgment/..."/>
+          </div>
+
+          <div class="upload-zone" id="zlr-upload-zone"
+               onclick="document.getElementById('zlr-file-input').click()"
+               ondrop="handleZlrDrop(event)"
+               ondragover="handleDragOver(event)"
+               ondragleave="handleDragLeave(event)">
+            <div style="font-size:2rem">📖</div>
+            <strong style="font-size:0.88rem">Drop file here or click to browse</strong>
+            <p>Photo (JPG/PNG/WEBP), PDF, or TXT</p>
+            <input type="file" id="zlr-file-input" style="display:none"
+                   accept=".pdf,.txt,.jpg,.jpeg,.png,.webp"
+                   onchange="handleZlrFileSelect(event)"/>
+          </div>
+          <div id="zlr-pending" style="margin-top:0.5rem"></div>
+          <button class="btn btn-primary" id="zlr-upload-btn" onclick="uploadZlrEntry()" disabled>
+            Index into Case Law Collection
+          </button>
+          <div class="tip">
+            📖 <strong>Physical volumes (ZLR, All England, SALR):</strong> Open to the headnote page, photograph clearly in good light, select the correct source and volume year, and upload. OCR reads the citation, judge, subject chains, and summary automatically.<br/><br/>
+            🌐 <strong>ZimLII / SAFLII / BAILII:</strong> Download the judgment PDF or copy the full text, select the matching source, and upload. The ZimLII URL field lets you link directly back to the original.<br/><br/>
+            ⚖ <strong>Authority weight</strong> is set automatically — Zimbabwe cases are <strong>binding</strong>, South African cases <strong>highly persuasive</strong>, English cases <strong>persuasive</strong>.
+          </div>
+        </div>
+      </div>
+
+      <!-- ZLR Search -->
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <div class="card-icon">🔍</div>
+          <div><div class="card-title">Search ZLR Index</div><div class="card-desc">Search by legal principle, case name, or subject</div></div>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <input type="text" id="zlr-search-query"
+                   placeholder="e.g. powers of liquidator · urgency requirements · rei vindicatio"
+                   onkeydown="if(event.key==='Enter')searchZlr()"/>
+          </div>
+          <div class="form-group">
+            <select id="zlr-category-filter">
+              <option value="">All categories</option>
+              <option value="Constitutional Law">Constitutional Law</option>
+              <option value="Administrative Law & Review">Administrative Law & Review</option>
+              <option value="Civil Procedure">Civil Procedure</option>
+              <option value="Appeals & Review">Appeals & Review</option>
+              <option value="Contract Law">Contract Law</option>
+              <option value="Property Law">Property Law</option>
+              <option value="Family Law & Matrimonial">Family Law & Matrimonial</option>
+              <option value="Customary Law & Succession">Customary Law & Succession</option>
+              <option value="Company & Commercial Law">Company & Commercial Law</option>
+              <option value="Employment & Labour Law">Employment & Labour Law</option>
+              <option value="Delict">Delict</option>
+              <option value="Criminal Law & Procedure">Criminal Law & Procedure</option>
+              <option value="Revenue & Tax Law">Revenue & Tax Law</option>
+              <option value="Insolvency & Sequestration">Insolvency & Sequestration</option>
+              <option value="Intellectual Property">Intellectual Property</option>
+              <option value="Environmental & Mining Law">Environmental & Mining Law</option>
+              <option value="Human Rights">Human Rights</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="searchZlr()" style="margin-top:0">🔍 Search Cases</button>
+          <div id="zlr-search-results" style="margin-top:1rem"></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <!-- Stats -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">📊</div>
+          <div><div class="card-title">Index Statistics</div><div class="card-desc">Cases indexed by category</div></div>
+        </div>
+        <div class="card-body" id="zlr-stats">
+          <div class="empty-state" style="padding:1.5rem">
+            <p style="font-size:0.82rem;color:var(--ink3)">No cases indexed yet. Start by uploading ZLR headnotes or ZimLII judgments.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent entries -->
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <div class="card-icon">📋</div>
+          <div><div class="card-title">Recently Indexed</div><div class="card-desc">Latest additions to the ZLR Index</div></div>
+        </div>
+        <div class="card-body" id="zlr-recent">
+          <div class="empty-state" style="padding:1.5rem">
+            <p style="font-size:0.82rem;color:var(--ink3)">No entries yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
 </div>
 
@@ -701,13 +1105,15 @@ function populateMatterSelects() {
 
 // ── Tab Navigation ────────────────────────────────────────────────────────────
 function showTab(tab) {
-  ['vault','search','matters','affidavit','calendar','legalupdates'].forEach(t => {
+  ['vault','search','matters','affidavit','calendar','legalupdates','draft','zlr'].forEach(t => {
     document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
     document.getElementById(`nav-${t}`).classList.toggle('active', t === tab);
   });
   if (tab === 'matters') renderMattersList();
   if (tab === 'calendar') { renderCalendar(); loadReminderSettings(); }
   if (tab === 'legalupdates') renderLegalUpdates();
+  if (tab === 'draft') populateDraftPrecedentSelect();
+  if (tab === 'zlr') renderZlrTab();
 }
 
 // ── Matters ───────────────────────────────────────────────────────────────────
@@ -945,6 +1351,35 @@ function renderSearchResults(data, query) {
   Object.entries(grouped).forEach(([docId, chunks]) => {
     const first = chunks[0];
     const topScore = Math.max(...chunks.map(c => c.similarity));
+
+    if (first.result_source === 'zlr') {
+      const weightBadge = first.authority_weight === 'Binding' ? '🟢' : first.authority_weight === 'Highly Persuasive' ? '🔵' : '⚪';
+      const weightColor = first.authority_weight === 'Binding' ? 'chip-green' : first.authority_weight === 'Highly Persuasive' ? 'chip-blue' : 'chip-gray';
+      html += `<div class="search-result" style="border-left:3px solid var(--green)">
+        <div class="sr-header">
+          <div style="font-size:1.2rem">📖</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:0.88rem">${escHtml(first.filename)}</div>
+            <div style="margin-top:3px">
+              ${first.citation ? `<span class="chip chip-green">${escHtml(first.citation)}</span>` : ''}
+              ${first.taxonomy_category ? `<span class="chip chip-blue">${escHtml(first.taxonomy_category)}</span>` : ''}
+              <span class="chip ${weightColor}">${weightBadge} ${escHtml(first.authority_weight || '')}</span>
+              ${first.court ? `<span class="chip chip-gray">${escHtml(first.court)}</span>` : ''}
+            </div>
+            ${first.subject_chains && first.subject_chains.length ? `
+              <div style="font-size:0.7rem;color:var(--ink3);font-style:italic;margin-top:3px">
+                ${escHtml(first.subject_chains.slice(0,2).join(' | '))}
+              </div>` : ''}
+          </div>
+          <span class="sr-score">${Math.round(topScore*100)}% match</span>
+        </div>
+        <div class="sr-body">
+          ${first.summary ? `<div class="sr-excerpt">${escHtml(first.summary.slice(0,350))}</div>` : ''}
+          ${first.zimlii_url ? `<a href="${escHtml(first.zimlii_url)}" target="_blank" class="btn btn-sm btn-outline">View online ↗</a>` : ''}
+        </div>
+      </div>`;
+      return;
+    }
 
     if (first.result_source === 'legal_update') {
       const isLegislation = first.source_type === 'legislation';
@@ -1405,6 +1840,408 @@ async function renderLegalUpdates() {
 async function deleteLegalUpdate(id) {
   await fetch(`${API}/api/legal-updates/${id}`, {method:'DELETE'});
   renderLegalUpdates();
+}
+
+// ── Draft Document ────────────────────────────────────────────────────────────
+let currentDocType = null;
+let draftPrecedentContext = null;
+
+const DOC_TYPE_LABELS = {
+  summons_matrimonial: "Matrimonial Summons",
+  summons_civil: "Civil Summons",
+  court_application: "Court Application",
+  urgent_chamber: "Urgent Chamber Application",
+  notice_of_appeal: "Notice of Appeal",
+  letter_of_demand: "Letter of Demand",
+  review: "Application for Review",
+  heads_of_argument: "Heads of Argument",
+  legal_opinion: "Legal Opinion",
+  client_letter: "Client Letter",
+  agreement: "Agreement / Contract",
+  joint_venture: "Joint Venture / Shareholders Agreement",
+  agreement_of_sale: "Agreement of Sale (Immoveable Property)",
+  acknowledgement_of_debt: "Acknowledgement of Debt",
+  power_of_attorney_transfer: "Power of Attorney to Pass Transfer",
+  declaration_transferor: "Declaration by Transferor",
+  declaration_transferee: "Declaration by Transferee",
+  special_power_of_attorney: "Special Power of Attorney",
+  sale_of_business: "Sale of Business Agreement",
+  memorandum_of_understanding: "Memorandum of Understanding",
+  freeform: "Document",
+};
+
+function selectDocType(type) {
+  currentDocType = type;
+  document.querySelectorAll('.doc-type-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById(`dt-${type}`)?.classList.add('selected');
+  document.getElementById('draft-step2').style.display = 'block';
+  document.getElementById('draft-form-title').textContent = `Step 2 — ${DOC_TYPE_LABELS[type] || 'Document'} Details`;
+  document.getElementById('draft-step2').scrollIntoView({behavior:'smooth', block:'nearest'});
+  populateDraftPrecedentSelect();
+}
+
+function resetDraftTab() {
+  currentDocType = null;
+  draftPrecedentContext = null;
+  document.querySelectorAll('.doc-type-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('draft-step2').style.display = 'none';
+  document.getElementById('draft-step3').style.display = 'none';
+  document.getElementById('draft-facts').value = '';
+  document.getElementById('draft-instructions').value = '';
+  document.getElementById('draft-plaintiff').value = '';
+  document.getElementById('draft-defendant').value = '';
+  document.getElementById('draft-casenumber').value = '';
+  document.getElementById('draft-editor').innerHTML = '';
+  document.getElementById('draft-precedent-banner').style.display = 'none';
+  showDraftStatus('', '');
+}
+
+function populateDraftPrecedentSelect() {
+  const sel = document.getElementById('draft-precedent-select');
+  sel.innerHTML = '<option value="">— No precedent —</option>';
+  matters.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name + (m.number ? ` — ${m.number}` : '');
+    sel.appendChild(opt);
+  });
+}
+
+async function loadDraftPrecedent() {
+  const matterId = document.getElementById('draft-precedent-select').value;
+  if (!matterId) { clearDraftPrecedent(); return; }
+  try {
+    const res = await fetch(`${API}/api/matters/${matterId}/documents`);
+    const docs = await res.json();
+    if (!docs.length) return;
+    const first = docs[0];
+    const matter = matters.find(m => m.id === matterId);
+    draftPrecedentContext = {
+      text: `Document from matter: ${matter?.name || ''}. Type: ${first.document_type || 'document'}. Parties: ${first.parties || 'unknown'}.`,
+      filename: first.filename,
+      matter_name: matter?.name || '',
+    };
+    document.getElementById('draft-precedent-banner').style.display = 'flex';
+    document.getElementById('draft-precedent-name').textContent = first.filename + ' — ' + (matter?.name || '');
+  } catch(e) {}
+}
+
+function clearDraftPrecedent() {
+  draftPrecedentContext = null;
+  document.getElementById('draft-precedent-banner').style.display = 'none';
+  document.getElementById('draft-precedent-select').value = '';
+}
+
+async function generateDocument() {
+  const facts = document.getElementById('draft-facts').value.trim();
+  if (!facts) { showDraftStatus('Please describe the facts and what the document must achieve.', 'error'); return; }
+  if (!currentDocType) { showDraftStatus('Please select a document type first.', 'error'); return; }
+
+  const btn = document.getElementById('draft-gen-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Drafting…';
+  showDraftStatus('AI is drafting your document. This may take 20–30 seconds for longer documents…', 'loading');
+
+  try {
+    const res = await fetch(`${API}/api/generate-document`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        doc_type: currentDocType,
+        plaintiff: document.getElementById('draft-plaintiff').value.trim() || null,
+        defendant: document.getElementById('draft-defendant').value.trim() || null,
+        court: document.getElementById('draft-court').value,
+        case_number: document.getElementById('draft-casenumber').value.trim() || null,
+        facts,
+        instructions: document.getElementById('draft-instructions').value.trim() || null,
+        precedent_context: draftPrecedentContext,
+      })
+    });
+
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Generation failed'); }
+    const data = await res.json();
+
+    // Render in editor — convert plain text to formatted HTML
+    const editor = document.getElementById('draft-editor');
+    const formatted = data.document
+      .split('\n')
+      .map(line => {
+        const t = line.trim();
+        if (!t) return '<p><br></p>';
+        if (t === t.toUpperCase() && t.length > 3 && t.length < 80) return `<p style="text-align:center"><strong>${escHtml(t)}</strong></p>`;
+        if (/^\d+\./.test(t)) return `<p>${escHtml(t)}</p>`;
+        return `<p>${escHtml(t)}</p>`;
+      }).join('');
+
+    editor.innerHTML = formatted;
+    document.getElementById('draft-step3').style.display = 'block';
+    document.getElementById('draft-editor-title').textContent = DOC_TYPE_LABELS[currentDocType] || 'Drafted Document';
+    document.getElementById('draft-step3').scrollIntoView({behavior:'smooth', block:'start'});
+    updateDraftWordCount();
+    showDraftStatus('✓ Document drafted. Edit directly in the editor below, then export.', 'success');
+  } catch(e) {
+    showDraftStatus(`Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '✍ Draft Document';
+  }
+}
+
+function fmtDoc(cmd, value) {
+  document.getElementById('draft-editor').focus();
+  document.execCommand(cmd, false, value || null);
+  updateDraftWordCount();
+}
+
+function changeFontSize(size) {
+  if (!size) return;
+  document.getElementById('draft-editor').focus();
+  document.execCommand('fontSize', false, '7');
+  const fontElements = document.getElementById('draft-editor').querySelectorAll('font[size="7"]');
+  fontElements.forEach(el => { el.removeAttribute('size'); el.style.fontSize = size; });
+}
+
+function updateDraftWordCount() {
+  const text = document.getElementById('draft-editor').innerText || '';
+  const count = text.trim().split(/\s+/).filter(Boolean).length;
+  document.getElementById('draft-wordcount').textContent = `${count} words`;
+}
+
+async function downloadDraftDocx() {
+  const editor = document.getElementById('draft-editor');
+  const html = editor.innerHTML;
+  const label = DOC_TYPE_LABELS[currentDocType] || 'Document';
+  const plaintiff = document.getElementById('draft-plaintiff').value.trim();
+  const filename = `${label}${plaintiff ? '_' + plaintiff.replace(/\s+/g,'_') : ''}`;
+
+  showDraftStatus('<span class="spinner"></span> Generating .docx…', 'loading');
+  try {
+    const res = await fetch(`${API}/api/export-document-docx`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ content_html: html, filename })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename + '.docx'; a.click();
+    URL.revokeObjectURL(url);
+    showDraftStatus('✓ Downloaded.', 'success');
+  } catch(e) {
+    showDraftStatus(`Download error: ${e.message}`, 'error');
+  }
+}
+
+function printDraft() {
+  window.print();
+}
+
+function showDraftStatus(msg, type) {
+  const el = document.getElementById('draft-status');
+  if (!el) return;
+  el.innerHTML = msg;
+  el.className = type ? `status show ${type}` : 'status';
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+document.getElementById('draft-editor')?.addEventListener('input', updateDraftWordCount);
+
+// ── ZLR Index ─────────────────────────────────────────────────────────────────
+let zlrPendingFile = null;
+
+function handleZlrDrop(e) {
+  e.preventDefault();
+  document.getElementById('zlr-upload-zone').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) setZlrFile(f);
+}
+function handleZlrFileSelect(e) {
+  const f = e.target.files[0];
+  if (f) setZlrFile(f);
+}
+function setZlrFile(file) {
+  zlrPendingFile = file;
+  document.getElementById('zlr-pending').innerHTML = `
+    <div class="upload-item">
+      <span>📖</span>
+      <span class="name">${escHtml(file.name)}</span>
+      <span style="font-size:0.7rem;color:var(--ink3)">${(file.size/1024).toFixed(0)} KB</span>
+      <button class="btn btn-sm" style="background:none;color:var(--ink3)"
+        onclick="zlrPendingFile=null;document.getElementById('zlr-pending').innerHTML='';document.getElementById('zlr-upload-btn').disabled=true">✕</button>
+    </div>`;
+  document.getElementById('zlr-upload-btn').disabled = false;
+}
+
+async function uploadZlrEntry() {
+  if (!zlrPendingFile) return;
+  const btn = document.getElementById('zlr-upload-btn');
+  btn.disabled = true;
+  showZlrStatus('<span class="spinner"></span> Uploading and parsing headnote…', 'loading');
+
+  try {
+    const fd = new FormData();
+    fd.append('file', zlrPendingFile);
+    fd.append('source', document.getElementById('zlr-source').value);
+    const vol = document.getElementById('zlr-volume').value.trim();
+    if (vol) fd.append('volume_year', vol);
+    const url = document.getElementById('zlr-url').value.trim();
+    if (url) fd.append('zimlii_url', url);
+
+    const res = await fetch(`${API}/api/zlr/upload`, {method:'POST', body: fd});
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Upload failed'); }
+    const item = await res.json();
+
+    zlrPendingFile = null;
+    document.getElementById('zlr-pending').innerHTML = '';
+    document.getElementById('zlr-volume').value = '';
+    document.getElementById('zlr-url').value = '';
+
+    const cat = item.taxonomy_category || 'General';
+    const cite = item.citation || item.judgment_number || '';
+    showZlrStatus(`✓ Indexed: ${escHtml(item.case_name || item.filename)} [${escHtml(cat)}] ${cite ? '· ' + escHtml(cite) : ''}`, 'success');
+    await renderZlrTab();
+  } catch(e) {
+    showZlrStatus(`Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = !zlrPendingFile;
+  }
+}
+
+function showZlrStatus(msg, type) {
+  const el = document.getElementById('zlr-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 6000);
+}
+
+async function renderZlrTab() {
+  await Promise.all([renderZlrStats(), renderZlrRecent()]);
+}
+
+async function renderZlrStats() {
+  const el = document.getElementById('zlr-stats');
+  try {
+    const res = await fetch(`${API}/api/zlr/categories`);
+    const cats = await res.json();
+    if (!cats.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:1.5rem"><p style="font-size:0.82rem;color:var(--ink3)">No cases indexed yet.</p></div>';
+      return;
+    }
+    const total = cats.reduce((s, c) => s + c.count, 0);
+    el.innerHTML = `
+      <p style="font-size:0.75rem;color:var(--ink3);margin-bottom:0.75rem"><strong>${total}</strong> case${total!==1?'s':''} indexed across ${cats.length} categor${cats.length!==1?'ies':'y'}</p>
+      ${cats.map(c => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:0.4rem;cursor:pointer"
+             onclick="document.getElementById('zlr-category-filter').value='${escHtml(c.category)}';searchZlr()">
+          <div style="flex:1;font-size:0.78rem;color:var(--ink2)">${escHtml(c.category)}</div>
+          <div style="background:var(--green);color:white;border-radius:10px;padding:1px 8px;font-size:0.68rem;font-weight:700">${c.count}</div>
+        </div>
+        <div style="height:3px;background:var(--paper2);border-radius:2px;margin-bottom:0.4rem">
+          <div style="height:100%;background:var(--green);border-radius:2px;width:${Math.round(c.count/total*100)}%"></div>
+        </div>
+      `).join('')}
+    `;
+  } catch(e) {
+    el.innerHTML = '<p style="font-size:0.8rem;color:var(--ink3)">Could not load statistics.</p>';
+  }
+}
+
+async function renderZlrRecent() {
+  const el = document.getElementById('zlr-recent');
+  try {
+    const res = await fetch(`${API}/api/zlr?limit=10`);
+    const items = await res.json();
+    if (!items.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:1.5rem"><p style="font-size:0.82rem;color:var(--ink3)">No entries yet.</p></div>';
+      return;
+    }
+    el.innerHTML = items.map(item => {
+      const weightBadge = item.authority_weight === 'Binding' ? '🟢' : item.authority_weight === 'Highly Persuasive' ? '🔵' : '⚪';
+      const weightColor = item.authority_weight === 'Binding' ? 'chip-green' : item.authority_weight === 'Highly Persuasive' ? 'chip-blue' : 'chip-gray';
+      return `
+      <div class="doc-item" style="align-items:flex-start;padding:0.65rem 0">
+        <span style="margin-top:2px">📖</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:0.82rem;color:var(--ink)">${escHtml(item.case_name || item.filename)}</div>
+          <div style="margin-top:3px">
+            ${item.citation ? `<span class="chip chip-green">${escHtml(item.citation)}</span>` : ''}
+            ${item.judgment_number && !item.citation ? `<span class="chip chip-gray">${escHtml(item.judgment_number)}</span>` : ''}
+            ${item.taxonomy_category ? `<span class="chip chip-blue">${escHtml(item.taxonomy_category)}</span>` : ''}
+            <span class="chip ${weightColor}">${weightBadge} ${escHtml(item.authority_weight || item.jurisdiction || item.source)}</span>
+          </div>
+          ${item.summary ? `<div style="font-size:0.72rem;color:var(--ink3);margin-top:3px;font-style:italic">${escHtml(item.summary.slice(0,120))}…</div>` : ''}
+          ${item.zimlii_url ? `<a href="${escHtml(item.zimlii_url)}" target="_blank" style="font-size:0.7rem;color:var(--green)">View online ↗</a>` : ''}
+        </div>
+        <button class="btn btn-sm" style="background:none;color:var(--ink3);flex-shrink:0"
+                onclick="deleteZlrEntry('${item.id}')">🗑</button>
+      </div>
+    `}).join('');
+  } catch(e) {
+    el.innerHTML = '<p style="font-size:0.8rem;color:var(--ink3)">Could not load entries.</p>';
+  }
+}
+
+async function searchZlr() {
+  const query = document.getElementById('zlr-search-query').value.trim();
+  if (!query) return;
+  const category = document.getElementById('zlr-category-filter').value;
+  const el = document.getElementById('zlr-search-results');
+  el.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--ink3)"><span class="spinner"></span> Searching…</div>';
+
+  try {
+    const res = await fetch(`${API}/api/zlr/search`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ query, source_type: category || null, limit: 10 })
+    });
+    const data = await res.json();
+
+    if (!data.results.length) {
+      el.innerHTML = `<div class="empty-state" style="padding:1rem"><p style="font-size:0.82rem">No cases found for "${escHtml(query)}".</p></div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <p style="font-size:0.72rem;color:var(--ink3);margin-bottom:0.75rem">${data.count} result${data.count!==1?'s':''}</p>
+      ${data.results.map(r => {
+        const weightBadge = r.authority_weight === 'Binding' ? '🟢' : r.authority_weight === 'Highly Persuasive' ? '🔵' : '⚪';
+        const weightColor = r.authority_weight === 'Binding' ? 'chip-green' : r.authority_weight === 'Highly Persuasive' ? 'chip-blue' : 'chip-gray';
+        return `
+        <div class="search-result" style="margin-bottom:0.75rem">
+          <div class="sr-header">
+            <div style="font-size:1.1rem">📖</div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:0.85rem">${escHtml(r.case_name || 'Unknown')}</div>
+              <div style="margin-top:3px">
+                ${r.citation ? `<span class="chip chip-green">${escHtml(r.citation)}</span>` : ''}
+                ${r.judgment_number && !r.citation ? `<span class="chip chip-gray">${escHtml(r.judgment_number)}</span>` : ''}
+                ${r.taxonomy_category ? `<span class="chip chip-blue">${escHtml(r.taxonomy_category)}</span>` : ''}
+                <span class="chip ${weightColor}">${weightBadge} ${escHtml(r.authority_weight || r.jurisdiction || '')}</span>
+                ${r.court ? `<span class="chip chip-gray">${escHtml(r.court)}</span>` : ''}
+              </div>
+              ${r.subject_chains && r.subject_chains.length ? `
+                <div style="margin-top:4px;font-size:0.7rem;color:var(--ink3);font-style:italic">
+                  ${escHtml(r.subject_chains.slice(0,2).join(' | '))}
+                </div>` : ''}
+            </div>
+            <span class="sr-score">${Math.round(r.similarity*100)}%</span>
+          </div>
+          <div class="sr-body">
+            ${r.summary ? `<div class="sr-excerpt">${escHtml(r.summary)}</div>` : ''}
+            ${r.zimlii_url ? `<a href="${escHtml(r.zimlii_url)}" target="_blank" class="btn btn-sm btn-outline" style="margin-top:0.4rem">View online ↗</a>` : ''}
+          </div>
+        </div>
+      `}).join('')}
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="status show error">Search failed: ${e.message}</div>`;
+  }
+}
+
+async function deleteZlrEntry(id) {
+  await fetch(`${API}/api/zlr/${id}`, {method:'DELETE'});
+  renderZlrTab();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

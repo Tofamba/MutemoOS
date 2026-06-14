@@ -132,6 +132,7 @@ _embedding_model = None
 _chroma_client = None
 _firm_collection = None
 _legal_collection = None
+_zlr_collection = None
 
 def get_embedding_model():
     """Lazily load the sentence-transformers model (avoids slow startup if unused)."""
@@ -150,8 +151,8 @@ def embed_texts(texts: list) -> list:
     return vectors.tolist()
 
 def get_chroma_collections():
-    """Lazily initialize ChromaDB and return (firm_collection, legal_collection)."""
-    global _chroma_client, _firm_collection, _legal_collection
+    """Lazily initialize ChromaDB and return (firm_collection, legal_collection, zlr_collection)."""
+    global _chroma_client, _firm_collection, _legal_collection, _zlr_collection
     if _chroma_client is None:
         import chromadb
         chroma_path = os.path.join(os.path.dirname(__file__), "..", "data", "chroma")
@@ -163,8 +164,11 @@ def get_chroma_collections():
         _legal_collection = _chroma_client.get_or_create_collection(
             "legal_updates", metadata={"hnsw:space": "cosine"}
         )
+        _zlr_collection = _chroma_client.get_or_create_collection(
+            "zlr_index", metadata={"hnsw:space": "cosine"}
+        )
         print("[vector_store] ChromaDB initialized")
-    return _firm_collection, _legal_collection
+    return _firm_collection, _legal_collection, _zlr_collection
 
 # ── In-memory store (pilot) — persisted to disk as JSON ────────────────────────
 matters_db: dict = {}
@@ -175,6 +179,10 @@ calendar_db: list = []
 # Legal Updates — separate collection for legislation & case law (ZimLII / Veritas etc.)
 legal_updates_db: dict = {}
 legal_update_chunks: list = []
+
+# Zimbabwe Law Reports Index — dedicated collection for ZLR headnotes
+zlr_db: dict = {}
+zlr_chunks: list = []
 
 # Reminder settings (pilot — single firm/user)
 reminder_settings: dict = {
@@ -199,6 +207,8 @@ def save_state():
             "calendar_db": calendar_db,
             "legal_updates_db": legal_updates_db,
             "legal_update_chunks": legal_update_chunks,
+            "zlr_db": zlr_db,
+            "zlr_chunks": zlr_chunks,
             "reminder_settings": reminder_settings,
         }
         tmp_path = STATE_FILE + ".tmp"
@@ -226,6 +236,8 @@ def load_state():
         calendar_db[:] = state.get("calendar_db", [])
         legal_updates_db.clear(); legal_updates_db.update(state.get("legal_updates_db", {}))
         legal_update_chunks[:] = state.get("legal_update_chunks", [])
+        zlr_db.clear(); zlr_db.update(state.get("zlr_db", {}))
+        zlr_chunks[:] = state.get("zlr_chunks", [])
         reminder_settings.update(state.get("reminder_settings", {}))
         print(f"[persistence] loaded state: {len(matters_db)} matters, "
               f"{len(documents_db)} documents, {len(calendar_db)} calendar events, "
@@ -730,26 +742,28 @@ def chunk_text(text: str, page_count: int, doc_id: str, matter_id: str) -> list:
 def index_chunks_in_chroma(chunks: list, collection_type: str = "firm"):
     """
     Embed a list of chunks and store them in the appropriate ChromaDB collection.
-    collection_type: "firm" for firm_precedents, "legal" for legal_updates.
-    Safe to call with an empty list. Failures are logged but non-fatal —
-    chunks remain searchable via keyword fallback even if embedding fails.
+    collection_type: "firm", "legal", or "zlr"
     """
     if not chunks:
         return
     try:
-        firm_col, legal_col = get_chroma_collections()
-        collection = firm_col if collection_type == "firm" else legal_col
+        firm_col, legal_col, zlr_col = get_chroma_collections()
+        if collection_type == "firm":
+            collection = firm_col
+        elif collection_type == "legal":
+            collection = legal_col
+        else:
+            collection = zlr_col
 
         texts = [c["text"] for c in chunks]
         ids = [c["id"] for c in chunks]
         embeddings = embed_texts(texts)
 
-        # Chroma metadata values must be str/int/float/bool — sanitize
         metadatas = []
         for c in chunks:
             meta = {
                 "document_id": c["document_id"],
-                "matter_id": c["matter_id"],
+                "matter_id": c.get("matter_id", "zlr"),
                 "chunk_index": c["chunk_index"],
                 "page_number": c.get("page_number") or 0,
             }
@@ -764,8 +778,13 @@ def remove_chunks_from_chroma(chunk_ids: list, collection_type: str = "firm"):
     if not chunk_ids:
         return
     try:
-        firm_col, legal_col = get_chroma_collections()
-        collection = firm_col if collection_type == "firm" else legal_col
+        firm_col, legal_col, zlr_col = get_chroma_collections()
+        if collection_type == "firm":
+            collection = firm_col
+        elif collection_type == "legal":
+            collection = legal_col
+        else:
+            collection = zlr_col
         collection.delete(ids=chunk_ids)
     except Exception as e:
         print(f"[vector_store] failed to remove chunks ({collection_type}): {e}")
@@ -794,6 +813,436 @@ JSON only:"""}]
     except Exception:
         return {}
 
+# ── Zimbabwe Law Reports Index ─────────────────────────────────────────────────
+# Dedicated collection for ZLR headnotes — photographed from physical volumes
+# or downloaded from ZimLII. Separate from firm precedents and general legal updates.
+# Each entry stores the structured headnote data extracted from the ZLR format.
+
+JURISDICTION_MAP = {
+    "ZimLII": "Zimbabwe",
+    "ZLR": "Zimbabwe",
+    "ZLR-Rhodesia": "Zimbabwe (Rhodesia)",
+    "SAFLII": "South Africa",
+    "SALR": "South Africa",
+    "SACR": "South Africa",
+    "BCLR": "South Africa",
+    "BAILII": "England & Wales",
+    "AllER": "England & Wales",
+    "WLR": "England & Wales",
+    "AC": "England & Wales",
+    "Privy Council": "Privy Council",
+    "Other": "Other",
+}
+
+AUTHORITY_WEIGHT = {
+    "Zimbabwe": "Binding",
+    "Zimbabwe (Rhodesia)": "Binding",
+    "South Africa": "Highly Persuasive",
+    "England & Wales": "Persuasive",
+    "Privy Council": "Persuasive",
+    "Other": "Persuasive",
+}
+
+def get_jurisdiction(source: str) -> str:
+    return JURISDICTION_MAP.get(source, "Other")
+
+def get_authority_weight(source: str) -> str:
+    return AUTHORITY_WEIGHT.get(get_jurisdiction(source), "Persuasive")
+
+ZLR_SUBJECT_TAXONOMY = {
+    "constitutional": "Constitutional Law",
+    "administrative": "Administrative Law & Review",
+    "civil procedure": "Civil Procedure",
+    "appeal": "Appeals & Review",
+    "contract": "Contract Law",
+    "property": "Property Law",
+    "family": "Family Law & Matrimonial",
+    "matrimonial": "Family Law & Matrimonial",
+    "customary": "Customary Law & Succession",
+    "succession": "Customary Law & Succession",
+    "company": "Company & Commercial Law",
+    "commercial": "Company & Commercial Law",
+    "employment": "Employment & Labour Law",
+    "labour": "Employment & Labour Law",
+    "delict": "Delict",
+    "criminal": "Criminal Law & Procedure",
+    "revenue": "Revenue & Tax Law",
+    "tax": "Revenue & Tax Law",
+    "insolvency": "Insolvency & Sequestration",
+    "liquidation": "Insolvency & Sequestration",
+    "intellectual property": "Intellectual Property",
+    "mining": "Environmental & Mining Law",
+    "environmental": "Environmental & Mining Law",
+    "human rights": "Human Rights",
+    "stock exchange": "Company & Commercial Law",
+    "banking": "Company & Commercial Law",
+    "land": "Property Law",
+    "evidence": "Civil Procedure",
+    "prescription": "Civil Procedure",
+    "costs": "Civil Procedure",
+    "interdict": "Civil Procedure",
+    "urgent": "Civil Procedure",
+}
+
+def classify_zlr_subject(subject_chains: list) -> str:
+    """Map ZLR subject chains to our taxonomy category."""
+    text = " ".join(subject_chains).lower()
+    for keyword, category in ZLR_SUBJECT_TAXONOMY.items():
+        if keyword in text:
+            return category
+    return "General"
+
+def parse_zlr_headnote(text: str) -> dict:
+    """
+    Parse a ZLR headnote page (OCR'd from physical volume or copied from ZimLII).
+    Extracts: citation, court, judge, case type, dates, subject chains, summary.
+
+    ZLR format example:
+      Gwatidzo NO v First Transfer Securities (Pvt) Ltd & Ors
+      2014 (1) ZLR 459 (H)
+      High Court, Harare        Judgment No. HH-165-14
+      Makoni J
+      Chamber application
+      11 November 2013; CAV
+      Date of Judgment: 3 April 2014
+      [italic subject chains]
+      [summary text]
+    """
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    result = {
+        "citation": None,
+        "case_name": None,
+        "court": None,
+        "judgment_number": None,
+        "judge": None,
+        "case_type": None,
+        "hearing_date": None,
+        "judgment_date": None,
+        "subject_chains": [],
+        "taxonomy_category": None,
+        "summary": None,
+        "zimlii_url": None,
+    }
+
+    # Extract ZLR citation (e.g. "2014 (1) ZLR 459 (H)")
+    import re
+    for line in lines:
+        if re.search(r'\d{4}\s*\(\d+\)\s*ZLR\s*\d+', line):
+            result["citation"] = line.strip()
+            break
+        # Also handle ZimLII format (e.g. "HH-165-14" or "SC 45/2023")
+        if re.search(r'(HH|SC|CCZ|LC|HB|HM|HMT)-?\d+[-/]\d+', line):
+            result["judgment_number"] = line.strip()
+
+    # Extract judgment number (HH-165-14 pattern)
+    for line in lines:
+        m = re.search(r'(?:Judgment No\.?\s*)?((?:HH|SC|CCZ|LC|HB|HM|HMT)[-\s]?\d+[-/]\d+)', line, re.IGNORECASE)
+        if m:
+            result["judgment_number"] = m.group(1).strip()
+            break
+
+    # Extract court
+    courts = ["High Court, Harare", "High Court, Bulawayo", "High Court, Masvingo",
+              "High Court, Mutare", "Supreme Court", "Constitutional Court",
+              "Labour Court", "Administrative Court", "Magistrates Court"]
+    for line in lines:
+        for court in courts:
+            if court.lower() in line.lower():
+                result["court"] = court
+                break
+
+    # Extract case name (usually first substantive line, all caps or mixed)
+    for line in lines[:5]:
+        if re.search(r'\bv\b', line, re.IGNORECASE) and len(line) > 10:
+            if not re.search(r'\d{4}.*ZLR', line):
+                result["case_name"] = line.strip()
+                break
+
+    # Extract judge (ends in J, JA, CJ, DCJ, AJA, JP)
+    for line in lines:
+        if re.search(r'\b(J|JA|CJ|DCJ|AJA|JP|AJ)\b$', line.strip()):
+            result["judge"] = line.strip()
+            break
+
+    # Extract case type
+    case_types = ["Chamber application", "Urgent application", "Appeal", "Review",
+                  "Action", "Application", "Trial", "Motion"]
+    for line in lines:
+        for ct in case_types:
+            if ct.lower() == line.lower().strip():
+                result["case_type"] = ct
+                break
+
+    # Extract dates
+    for line in lines:
+        if "Date of Judgment" in line or "Judgment date" in line.lower():
+            result["judgment_date"] = re.sub(r'Date of Judgment:?\s*', '', line).strip()
+        elif re.search(r'\d+\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}', line):
+            if not result["hearing_date"]:
+                result["hearing_date"] = line.strip()
+
+    # Extract subject chains — lines with " – " or " — " pattern (ZLR style)
+    chains = []
+    for line in lines:
+        if ' – ' in line or ' — ' in line or ' - ' in line:
+            # Looks like a subject chain
+            if not re.search(r'\d{4}.*ZLR', line):  # not a citation
+                chains.append(line.strip())
+
+    # Also catch ZimLII format: "Category — Sub-category — Specific point"
+    for line in lines:
+        if re.search(r'[A-Z][a-z]+ (law|procedure|Act|rights) —', line):
+            if line not in chains:
+                chains.append(line.strip())
+
+    result["subject_chains"] = chains
+    result["taxonomy_category"] = classify_zlr_subject(chains)
+
+    # Summary — first substantial paragraph (50+ chars, not a chain or citation)
+    for line in lines:
+        if (len(line) > 50
+                and ' – ' not in line and ' — ' not in line
+                and not re.search(r'\d{4}.*ZLR', line)
+                and not re.search(r'(HH|SC|CCZ)-?\d+', line)
+                and line != result.get("case_name")
+                and not re.search(r'\b(J|JA|CJ)\b$', line)):
+            result["summary"] = line.strip()
+            break
+
+    return result
+
+class ZLRUploadRequest(BaseModel):
+    source: str = "ZLR"  # "ZLR" (physical volume) or "ZimLII" (downloaded)
+    volume_year: Optional[str] = None  # e.g. "2014 (1)"
+    zimlii_url: Optional[str] = None
+
+@app.get("/api/zlr")
+async def list_zlr_entries(category: Optional[str] = None, limit: int = 50):
+    items = list(zlr_db.values())
+    if category:
+        items = [i for i in items if i.get("taxonomy_category") == category]
+    items.sort(key=lambda x: x.get("uploaded_at", ""), reverse=True)
+    return items[:limit]
+
+@app.get("/api/zlr/categories")
+async def zlr_categories():
+    """Return all taxonomy categories and their case counts."""
+    counts = {}
+    for item in zlr_db.values():
+        cat = item.get("taxonomy_category", "General")
+        counts[cat] = counts.get(cat, 0) + 1
+    return sorted([{"category": k, "count": v} for k, v in counts.items()],
+                  key=lambda x: x["count"], reverse=True)
+
+@app.post("/api/zlr/upload")
+async def upload_zlr_document(
+    file: UploadFile = File(...),
+    source: str = Form("ZLR"),
+    volume_year: Optional[str] = Form(None),
+    zimlii_url: Optional[str] = Form(None),
+):
+    """Upload a ZLR headnote page (photographed from physical volume or ZimLII PDF)."""
+    content = await file.read()
+    filename = file.filename or "zlr_entry"
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "bin"
+
+    text = ""
+    page_count = 1
+    ocr_used = False
+
+    try:
+        if ext == "pdf":
+            text, page_count, ocr_used = extract_pdf_text(content)
+        elif ext in ("txt",):
+            text = content.decode("utf-8", errors="replace")
+        elif ext in ("jpg", "jpeg", "png", "webp"):
+            # Image upload — run OCR directly
+            with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            try:
+                import subprocess as sp
+                ocr_result = sp.run(
+                    ["tesseract", tmp_path, "stdout", "-l", "eng"],
+                    capture_output=True, text=True, timeout=60
+                )
+                text = ocr_result.stdout.strip()
+                ocr_used = True
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+        else:
+            text = content.decode("utf-8", errors="replace")
+    except Exception as e:
+        text = ""
+
+    if not text:
+        raise HTTPException(status_code=422, detail="Could not extract text from document. Try a clearer photo or PDF.")
+
+    # Parse the ZLR headnote structure
+    parsed = parse_zlr_headnote(text)
+
+    item_id = str(uuid.uuid4())
+    jurisdiction = get_jurisdiction(source)
+    authority_weight = get_authority_weight(source)
+    item = {
+        "id": item_id,
+        "filename": filename,
+        "source": source,
+        "jurisdiction": jurisdiction,
+        "authority_weight": authority_weight,
+        "volume_year": volume_year,
+        "zimlii_url": zimlii_url or parsed.get("zimlii_url"),
+        "case_name": parsed.get("case_name") or filename,
+        "citation": parsed.get("citation"),
+        "judgment_number": parsed.get("judgment_number"),
+        "court": parsed.get("court"),
+        "judge": parsed.get("judge"),
+        "case_type": parsed.get("case_type"),
+        "hearing_date": parsed.get("hearing_date"),
+        "judgment_date": parsed.get("judgment_date"),
+        "subject_chains": parsed.get("subject_chains", []),
+        "taxonomy_category": parsed.get("taxonomy_category", "General"),
+        "summary": parsed.get("summary"),
+        "raw_text": text,
+        "word_count": len(text.split()),
+        "chunk_count": 0,
+        "ocr_used": ocr_used,
+        "uploaded_at": datetime.utcnow().isoformat(),
+    }
+    zlr_db[item_id] = item
+
+    # Chunk and index
+    # Each chunk gets enriched with ZLR metadata for better search context
+    enriched_text = f"""CASE: {item['case_name'] or ''}
+CITATION: {item['citation'] or ''}
+JUDGMENT: {item['judgment_number'] or ''}
+COURT: {item['court'] or ''}
+JUDGE: {item['judge'] or ''}
+CATEGORY: {item['taxonomy_category'] or ''}
+SUBJECT: {' | '.join(item['subject_chains'])}
+SUMMARY: {item['summary'] or ''}
+
+FULL TEXT:
+{text}"""
+
+    new_chunks = chunk_text(enriched_text, page_count, item_id, "zlr")
+    for c in new_chunks:
+        c["zlr_item_id"] = item_id
+        c["citation"] = item.get("citation")
+        c["case_name"] = item.get("case_name")
+        c["taxonomy_category"] = item.get("taxonomy_category")
+
+    zlr_chunks.extend(new_chunks)
+    item["chunk_count"] = len(new_chunks)
+    await asyncio.to_thread(index_chunks_in_chroma, new_chunks, "zlr")
+
+    save_state()
+    return item
+
+@app.delete("/api/zlr/{item_id}")
+async def delete_zlr_entry(item_id: str):
+    if item_id not in zlr_db:
+        raise HTTPException(status_code=404, detail="Not found")
+    del zlr_db[item_id]
+    global zlr_chunks
+    removed_ids = [c["id"] for c in zlr_chunks if c["document_id"] == item_id]
+    zlr_chunks = [c for c in zlr_chunks if c["document_id"] != item_id]
+    await asyncio.to_thread(remove_chunks_from_chroma, removed_ids, "zlr")
+    save_state()
+    return {"deleted": True}
+
+@app.post("/api/zlr/search")
+async def search_zlr(req: LegalUpdateSearchRequest):
+    """Dedicated semantic search across the ZLR Index."""
+    if not zlr_chunks:
+        return {"results": [], "message": "No ZLR entries indexed yet."}
+
+    results = await asyncio.to_thread(_zlr_semantic_search, req.query, req.source_type, req.limit)
+    return {"results": results, "count": len(results)}
+
+def _zlr_semantic_search(query: str, category_filter: Optional[str], limit: int) -> list:
+    """Semantic search over ZLR index with optional category filter."""
+    results = []
+    try:
+        _, _, zlr_col = get_chroma_collections()
+        if zlr_col.count() > 0:
+            query_vec = embed_texts([query])[0]
+            res = zlr_col.query(
+                query_embeddings=[query_vec],
+                n_results=min(limit * 3, zlr_col.count())
+            )
+            ids = res["ids"][0] if res["ids"] else []
+            distances = res["distances"][0] if res["distances"] else []
+            chunk_by_id = {c["id"]: c for c in zlr_chunks}
+
+            seen_items = set()
+            for cid, dist in zip(ids, distances):
+                chunk = chunk_by_id.get(cid)
+                if not chunk:
+                    continue
+                item_id = chunk["document_id"]
+                if item_id in seen_items:
+                    continue
+                item = zlr_db.get(item_id, {})
+                if category_filter and item.get("taxonomy_category") != category_filter:
+                    continue
+                seen_items.add(item_id)
+                similarity = max(0.0, 1.0 - dist)
+                results.append({
+                    "item_id": item_id,
+                    "similarity": round(similarity, 3),
+                    "case_name": item.get("case_name"),
+                    "citation": item.get("citation"),
+                    "judgment_number": item.get("judgment_number"),
+                    "court": item.get("court"),
+                    "judge": item.get("judge"),
+                    "taxonomy_category": item.get("taxonomy_category"),
+                    "subject_chains": item.get("subject_chains", []),
+                    "summary": item.get("summary"),
+                    "judgment_date": item.get("judgment_date"),
+                    "source": item.get("source"),
+                    "zimlii_url": item.get("zimlii_url"),
+                    "relevant_excerpt": chunk["text"][:400],
+                })
+                if len(results) >= limit:
+                    break
+    except Exception as e:
+        print(f"[zlr_search] error: {e}")
+        # Keyword fallback
+        query_words = set(query.lower().split())
+        scored = []
+        for item in zlr_db.values():
+            if category_filter and item.get("taxonomy_category") != category_filter:
+                continue
+            text = " ".join([
+                item.get("case_name", ""),
+                item.get("citation", ""),
+                item.get("summary", ""),
+                " ".join(item.get("subject_chains", [])),
+            ]).lower()
+            score = len(query_words & set(text.split())) / max(len(query_words), 1)
+            if score > 0:
+                scored.append((score, item))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        for score, item in scored[:limit]:
+            results.append({
+                "item_id": item["id"],
+                "similarity": round(score, 3),
+                "case_name": item.get("case_name"),
+                "citation": item.get("citation"),
+                "judgment_number": item.get("judgment_number"),
+                "court": item.get("court"),
+                "taxonomy_category": item.get("taxonomy_category"),
+                "subject_chains": item.get("subject_chains", []),
+                "summary": item.get("summary"),
+                "judgment_date": item.get("judgment_date"),
+                "source": item.get("source"),
+                "zimlii_url": item.get("zimlii_url"),
+                "relevant_excerpt": item.get("summary", ""),
+            })
+    return results
+
 # ── Search ────────────────────────────────────────────────────────────────────
 
 @app.post("/api/search")
@@ -803,7 +1252,31 @@ async def search_documents(req: SearchRequest):
     if req.include_legal_updates:
         legal_results = await asyncio.to_thread(semantic_search_legal, req)
 
-    all_results = results + legal_results
+    # Include ZLR results if index has content
+    zlr_results = []
+    if zlr_chunks:
+        zlr_req = LegalUpdateSearchRequest(query=req.query, limit=3)
+        raw_zlr = await asyncio.to_thread(_zlr_semantic_search, req.query, None, 3)
+        for r in raw_zlr:
+            zlr_results.append({
+                "result_source": "zlr",
+                "chunk_id": r.get("item_id"),
+                "text": r.get("relevant_excerpt", ""),
+                "similarity": r.get("similarity", 0),
+                "document_id": r.get("item_id"),
+                "filename": r.get("case_name") or r.get("citation") or "ZLR Entry",
+                "citation": r.get("citation"),
+                "judgment_number": r.get("judgment_number"),
+                "taxonomy_category": r.get("taxonomy_category"),
+                "subject_chains": r.get("subject_chains", []),
+                "summary": r.get("summary"),
+                "court": r.get("court"),
+                "doc_date": r.get("judgment_date"),
+                "source": r.get("source"),
+                "zimlii_url": r.get("zimlii_url"),
+            })
+
+    all_results = results + legal_results + zlr_results
 
     if not all_results:
         return {"answer": None, "results": [], "message": f'No relevant documents found for: "{req.query}"'}
@@ -1109,7 +1582,308 @@ Draft the complete affidavit:"""
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── DOCX Export ───────────────────────────────────────────────────────────────
+# ── Document Generator (letters, summons, applications, heads etc.) ────────────
+
+class DocumentRequest(BaseModel):
+    doc_type: str
+    plaintiff: Optional[str] = None
+    defendant: Optional[str] = None
+    court: Optional[str] = "High Court of Zimbabwe"
+    case_number: Optional[str] = None
+    facts: str
+    instructions: Optional[str] = None
+    precedent_context: Optional[dict] = None
+    # Type-specific fields
+    extra: Optional[dict] = None
+
+DOC_TYPE_PROMPTS = {
+    "summons_matrimonial": """You are drafting a Matrimonial Summons for the Zimbabwe High Court.
+Follow Zimbabwe Matrimonial Causes Act [Chapter 5:13] and High Court Rules SI 202/2021.
+Include: full court caption, case number, parties with designations, grounds for divorce/relief claimed,
+return date, service instructions, registrar's endorsement block. Use formal Zimbabwe High Court summons format.""",
+
+    "summons_civil": """You are drafting a Civil Summons for Zimbabwe courts.
+Follow High Court Rules SI 202/2021. Include: court caption, parties, cause of action clearly stated,
+amount or relief claimed, return date, defendant's right to appear. Proper summons format throughout.""",
+
+    "court_application": """You are drafting a Court Application (Notice of Motion) for Zimbabwe.
+Include: Notice of Motion with return date, draft order sought, founding affidavit reference,
+certificate of service. Follow High Court Rules. Relief must be specific and numbered.""",
+
+    "urgent_chamber": """You are drafting an Urgent Chamber Application for Zimbabwe High Court.
+Include: Certificate of Urgency (explaining why matter cannot wait for normal set-down),
+Notice of Motion for urgent relief, draft order with interim and final relief,
+grounds of urgency clearly articulated. Follow Zimbabwe urgent application practice.""",
+
+    "notice_of_appeal": """You are drafting a Notice of Appeal for Zimbabwe courts.
+Specify: court appealing from, court appealing to, judgment/order being appealed,
+date of judgment, grounds of appeal (numbered, specific), relief sought on appeal.
+Follow Supreme Court of Zimbabwe Act and relevant rules.""",
+
+    "letter_of_demand": """You are drafting a formal Letter of Demand for a Zimbabwe law firm.
+Include: firm letterhead block, date, addressee, subject line, formal demand with legal basis,
+deadline for compliance, consequences of non-compliance, formal closing.
+Professional tone, firm but not inflammatory.""",
+
+    "review": """You are drafting an Application for Review (judicial review) for Zimbabwe.
+Include: grounds of review (illegality, irrationality, procedural impropriety),
+decision being reviewed, date of decision, decision-maker, relief sought.
+Follow Administrative Justice Act and High Court practice for review applications.""",
+
+    "heads_of_argument": """You are drafting Heads of Argument for Zimbabwe courts.
+Structure: introduction/overview, issues for determination (numbered), 
+argument on each issue (with case law citations where possible, noting Zimbabwe cases preferred),
+conclusion and relief sought. Logical, concise, persuasive. Number all paragraphs.
+Reference Zimbabwe case law and Roman-Dutch common law principles as appropriate.""",
+
+    "legal_opinion": """You are drafting a formal Legal Opinion for a Zimbabwe law firm (Sawyer & Mkushi).
+Structure: instruction/question posed, brief facts, applicable law (Acts, case law, common law),
+analysis, conclusion/advice, qualifications/caveats. Professional, precise, hedged appropriately.
+Cite Zimbabwe legislation and case law where relevant.""",
+
+    "client_letter": """You are drafting a formal client letter for Sawyer & Mkushi Legal Practitioners, Harare.
+Include: firm header block, date, client address, reference/matter heading, formal salutation,
+clear body paragraphs, action points if any, formal closing. Professional Zimbabwe legal correspondence style.""",
+
+    "agreement": """You are drafting a legal Agreement/Contract governed by Zimbabwe law.
+Include: parties clause, recitals/background, definitions, operative clauses,
+representations and warranties where appropriate, breach and remedies,
+governing law (Zimbabwe), dispute resolution, signature blocks.
+Follow Zimbabwe contract law principles (Roman-Dutch common law base).""",
+
+    "freeform": """You are a legal drafting assistant for Sawyer & Mkushi Legal Practitioners, Harare, Zimbabwe.
+Draft the legal document described below following Zimbabwe law, court rules, and legal practice.
+Use appropriate formal legal language. Structure the document correctly for its type.
+Include all standard components for this kind of document in Zimbabwe legal practice.""",
+
+    "joint_venture": """You are drafting a Joint Venture / Shareholders Agreement governed by Zimbabwe law.
+Follow the Companies and Other Business Entities Act [Chapter 24:31] (COBE Act).
+Include: parties, recitals, purpose and scope of joint venture, capital contributions,
+shareholding structure, management and decision-making (board composition, reserved matters,
+quorum, voting), profit distribution, intellectual property, confidentiality, restraint of trade,
+deadlock resolution, exit provisions (drag-along, tag-along, pre-emptive rights),
+dissolution/winding up, governing law (Zimbabwe), dispute resolution (arbitration or litigation),
+signature blocks with witness attestation. Comprehensive commercial drafting throughout.""",
+
+    "agreement_of_sale": """You are drafting an Agreement of Sale of Immoveable Property governed by Zimbabwe law.
+Follow the Deeds Registries Act [Chapter 20:05] and Conveyancing practice in Zimbabwe.
+Include: full property description (stand number, township, extent, held under Deed of Transfer number),
+purchase price (in USD or ZWG as specified), deposit terms, balance payment date,
+occupational interest if applicable, voetstoots clause, fixtures and fittings,
+conditions of sale, breach provisions, transfer costs (who bears transfer duty, conveyancing fees),
+ZIMRA RTGS and capital gains tax obligations, conveyancer appointment,
+warranties as to title and encumbrances, signature blocks with witness attestation.
+Reference Zimbabwe Deeds Registry requirements throughout.""",
+
+    "acknowledgement_of_debt": """You are drafting an Acknowledgement of Debt (Deed of Acknowledgement) governed by Zimbabwe law.
+Include: debtor's full details (name, ID number, address), creditor's full details,
+acknowledgement of the debt amount (in figures and words), original cause of debt,
+repayment terms (lump sum or instalments with schedule), interest rate if applicable,
+consent to judgment clause (confession of judgment), default provisions,
+costs clause (attorney and client scale), governing law (Zimbabwe),
+signature block for debtor with witness attestation. This document must be enforceable
+as a liquid document under Zimbabwe law to found a claim without trial.""",
+
+    "power_of_attorney_transfer": """You are drafting a Power of Attorney to Pass Transfer for Zimbabwe conveyancing.
+This is a formal conveyancing document used in the Zimbabwe Deeds Registry.
+Include: grantor's full details (seller/transferor — full name, ID number, address),
+attorney's details (conveyancer or firm), full property description
+(stand number, township, Deed of Transfer number, extent), purchase price,
+purchaser's full details, scope of authority (to appear before Registrar of Deeds,
+sign transfer documents, pass transfer), ratification clause, revocation terms,
+formal attestation block (signed before Commissioner of Oaths or Notary Public).
+Follow Deeds Registries Act [Chapter 20:05] requirements precisely.""",
+
+    "declaration_transferor": """You are drafting a Declaration by Transferor for Zimbabwe Deeds Registry transfer purposes.
+This is a statutory declaration required under the Deeds Registries Act [Chapter 20:05].
+The transferor (seller) declares: full name and identity details, marital status and matrimonial regime
+(in community of property or out of community — critical for Zimbabwe conveyancing),
+that they are the registered owner of the property described, that the property is not
+subject to any undisclosed encumbrances, any Capital Gains Tax obligations,
+ZIMRA compliance status, that spousal consent has been obtained where required under
+the Matrimonial Causes Act or customary law. Formal sworn declaration format before
+Commissioner of Oaths. Include all standard conveyancing declarations required by the
+Registrar of Deeds, Harare.""",
+
+    "declaration_transferee": """You are drafting a Declaration by Transferee for Zimbabwe Deeds Registry transfer purposes.
+This is a statutory declaration required under the Deeds Registries Act [Chapter 20:05].
+The transferee (purchaser/buyer) declares: full name and identity details,
+marital status and matrimonial regime (in community of property or out of community —
+critical as it determines how title will be registered), citizenship/residency status,
+that they accept transfer of the property described, that the purchase price stated
+is the true and full consideration, any ZIMRA obligations (transfer duty),
+spousal details where property will be registered in community of property.
+Formal sworn declaration format before Commissioner of Oaths. Follow Deeds Registry
+requirements for Harare precisely.""",
+
+    "special_power_of_attorney": """You are drafting a Special Power of Attorney governed by Zimbabwe law.
+Unlike a general power of attorney, this is limited to a specific transaction or purpose.
+Include: grantor's full details (name, ID number, address, capacity),
+attorney/agent's full details, precise and limited scope of authority
+(exactly what the attorney is authorised to do — no wider),
+duration/expiry of the authority, specific transaction details if applicable,
+ratification clause (confirming all acts done within scope),
+revocation provisions, formal execution block (signed before Notary Public
+or Commissioner of Oaths as appropriate for the transaction).
+Common uses: property transactions, court appearances, banking, signing specific contracts.
+Tailor the scope precisely to what has been described.""",
+
+    "sale_of_business": """You are drafting a Sale of Business Agreement governed by Zimbabwe law.
+Include: parties (seller and purchaser with full details), description of the business
+(name, nature, location), assets being sold (goodwill, stock, equipment, debtors,
+contracts, intellectual property — itemised or by schedule), excluded assets,
+purchase price (allocation between goodwill, stock at valuation, fixed assets),
+payment terms and conditions, transfer of employees (Labour Act [Chapter 28:01] obligations),
+transfer of contracts and leases (consent requirements), restraint of trade
+(seller not to compete — reasonable in scope, area and time under Zimbabwe law),
+completion date and conditions precedent, warranties and representations by seller,
+indemnities, risk and benefit, ZIMRA obligations (VAT on going concern — zero-rated if applicable,
+capital gains tax considerations), breach and remedies, governing law Zimbabwe,
+dispute resolution, signature blocks with witness attestation.""",
+
+    "memorandum_of_understanding": """You are drafting a Memorandum of Understanding (MOU) governed by Zimbabwe law.
+Include: parties with full details, background and purpose, subject matter of the understanding,
+binding vs non-binding clauses (clearly distinguished — key for Zimbabwe commercial practice),
+obligations of each party, exclusivity period if applicable, confidentiality obligations,
+intellectual property ownership during the MOU period, costs and expenses,
+no partnership or agency clause (important — an MOU must not inadvertently create a partnership
+under the Partnership Act or COBE Act), duration and termination,
+conditions for proceeding to formal agreement, governing law (Zimbabwe),
+dispute resolution. Draft with appropriate hedging language where provisions
+are intended to be non-binding, and clear mandatory language where binding.""",
+}
+
+DOCUMENT_SYSTEM = """You are a senior legal drafting assistant for Sawyer & Mkushi Legal Practitioners, Harare, Zimbabwe.
+You have deep expertise in:
+- Zimbabwe High Court Rules SI 202/2021
+- Roman-Dutch common law as applied in Zimbabwe
+- Zimbabwe statutory law and practice
+- Formal Zimbabwe legal document drafting conventions
+- Customary law as applied in Zimbabwe courts
+
+Always produce complete, properly formatted documents ready for use.
+Use formal legal English as practised in Zimbabwe courts.
+Leave [_____] for information not provided."""
+
+@app.post("/api/generate-document")
+async def generate_document(req: DocumentRequest):
+    doc_system_addition = DOC_TYPE_PROMPTS.get(req.doc_type, DOC_TYPE_PROMPTS["freeform"])
+
+    precedent_block = ""
+    if req.precedent_context:
+        fname = req.precedent_context.get("filename", "precedent")
+        mname = req.precedent_context.get("matter_name", "")
+        text = str(req.precedent_context.get("text", ""))[:2000]
+        precedent_block = f"\n\nFIRM PRECEDENT — adopt this drafting style ({fname}, {mname}):\n---\n{text}\n---"
+
+    prompt = f"""Draft a complete {req.doc_type.replace('_', ' ').title()} for Zimbabwe courts.
+
+PARTIES:
+- Plaintiff/Applicant: {req.plaintiff or '[TO BE COMPLETED]'}
+- Defendant/Respondent: {req.defendant or '[TO BE COMPLETED]'}
+
+COURT: {req.court or 'High Court of Zimbabwe'}
+CASE NUMBER: {req.case_number or '[TO BE ALLOCATED]'}
+
+FACTS AND BACKGROUND:
+{req.facts}
+
+INSTRUCTIONS:
+{req.instructions or 'Draft in standard Zimbabwe legal form, complete and ready for use.'}
+
+EXTRA DETAILS:
+{json.dumps(req.extra) if req.extra else 'None provided.'}
+{precedent_block}
+
+Draft the complete document now:"""
+
+    try:
+        msg = await asyncio.to_thread(
+            client.messages.create,
+            model="claude-sonnet-4-5",
+            max_tokens=6000,
+            system=DOCUMENT_SYSTEM + "\n\n" + doc_system_addition,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        doc_id = str(uuid.uuid4())[:8].upper()
+        return {"document": msg.content[0].text, "document_id": doc_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class DocxExportRequest(BaseModel):
+    content_html: str
+    filename: Optional[str] = "document"
+
+@app.post("/api/export-document-docx")
+async def export_document_docx(req: DocxExportRequest):
+    """Export rich text HTML content to DOCX."""
+    doc_id = str(uuid.uuid4())[:8].upper()
+    safe_name = req.filename.replace(" ", "_")
+    output_filename = f"{safe_name}_{doc_id}.docx"
+    output_path = os.path.join(tempfile.gettempdir(), output_filename)
+
+    escaped_html = json.dumps(req.content_html)
+
+    js = f"""
+const {{ Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, PageNumber }} = require('docx');
+const fs = require('fs');
+
+// Parse HTML content to docx paragraphs
+const html = {escaped_html};
+const lines = html.replace(/<br\s*\/?>/gi, '\\n')
+  .replace(/<\/p>/gi, '\\n').replace(/<\/div>/gi, '\\n')
+  .replace(/<\/h[1-6]>/gi, '\\n').replace(/<\/li>/gi, '\\n')
+  .replace(/<[^>]+>/g, '').split('\\n');
+
+const children = [];
+lines.forEach(line => {{
+  const t = line.trim();
+  if (!t) {{ children.push(new Paragraph({{ spacing: {{ after: 120 }} }})); return; }}
+  const isCentered = /^IN THE|^BETWEEN:|^AND:|^v\\.?$|^-and-$/i.test(t);
+  children.push(new Paragraph({{
+    alignment: isCentered ? AlignmentType.CENTER : AlignmentType.JUSTIFIED,
+    spacing: {{ after: 160, line: 360 }},
+    children: [new TextRun({{ text: t, font: "Times New Roman", size: 24 }})]
+  }}));
+}});
+
+const doc = new Document({{
+  styles: {{ default: {{ document: {{ run: {{ font: "Times New Roman", size: 24 }} }} }} }},
+  sections: [{{
+    properties: {{ page: {{ size: {{ width: 11906, height: 16838 }},
+      margin: {{ top: 1440, right: 1440, bottom: 1800, left: 1800 }} }} }},
+    footers: {{ default: {{ children: [new Paragraph({{
+      alignment: AlignmentType.CENTER,
+      border: {{ top: {{ style: BorderStyle.SINGLE, size: 4, color: "999999", space: 8 }} }},
+      children: [
+        new TextRun({{ text: "Page ", font: "Times New Roman", size: 20, color: "666666" }}),
+        new TextRun({{ children: [PageNumber.CURRENT], font: "Times New Roman", size: 20, color: "666666" }}),
+        new TextRun({{ text: " of ", font: "Times New Roman", size: 20, color: "666666" }}),
+        new TextRun({{ children: [PageNumber.TOTAL_PAGES], font: "Times New Roman", size: 20, color: "666666" }}),
+      ]
+    }})] }} }},
+    children
+  }}]
+}});
+Packer.toBuffer(doc).then(buf => {{ fs.writeFileSync('{output_path}', buf); }}).catch(e => {{ console.error(e); process.exit(1); }});
+"""
+    js_file = os.path.join(tempfile.gettempdir(), f"gendoc_{doc_id}.js")
+    with open(js_file, "w") as f:
+        f.write(js)
+    try:
+        result = subprocess.run(["node", js_file], capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Export failed: {result.stderr}")
+        if not os.path.exists(output_path):
+            raise HTTPException(status_code=500, detail="File not created")
+        return FileResponse(path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=output_filename)
+    finally:
+        if os.path.exists(js_file):
+            os.remove(js_file)
+
+
 
 @app.post("/api/export-docx")
 async def export_docx(req: ExportRequest):
