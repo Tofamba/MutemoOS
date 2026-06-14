@@ -367,7 +367,37 @@ async def reindex_semantic_search():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Re-index failed: {e}")
 
-# ── Matters ───────────────────────────────────────────────────────────────────
+@app.post("/api/admin/reclassify-zlr")
+async def reclassify_zlr():
+    """
+    Re-run AI classification on all ZLR entries currently showing 'General'
+    category. Updates category, summary, and subject_chains in place.
+    """
+    updated = 0
+    failed = 0
+    for item_id, item in zlr_db.items():
+        if item.get("taxonomy_category") == "General" or not item.get("subject_chains"):
+            raw_text = item.get("raw_text", "")
+            if not raw_text:
+                continue
+            try:
+                ai_meta = await asyncio.to_thread(classify_case_with_ai, raw_text, item.get("filename", ""))
+                if ai_meta:
+                    if ai_meta.get("taxonomy_category") and ai_meta["taxonomy_category"] != "General":
+                        item["taxonomy_category"] = ai_meta["taxonomy_category"]
+                    if ai_meta.get("summary"):
+                        item["summary"] = ai_meta["summary"]
+                    if ai_meta.get("subject_chains"):
+                        item["subject_chains"] = ai_meta["subject_chains"]
+                    if ai_meta.get("case_type") and not item.get("case_type"):
+                        item["case_type"] = ai_meta["case_type"]
+                    updated += 1
+            except Exception:
+                failed += 1
+    save_state()
+    return {"updated": updated, "failed": failed, "total": len(zlr_db)}
+
+
 
 @app.get("/api/matters")
 async def list_matters():
@@ -1081,8 +1111,69 @@ async def upload_zlr_document(
     if not text:
         raise HTTPException(status_code=422, detail="Could not extract text from document. Try a clearer photo or PDF.")
 
+def classify_case_with_ai(text: str, filename: str) -> dict:
+    """
+    Use Claude Haiku to classify a case by category and extract a clean summary.
+    Used when the simple keyword parser returns 'General' or misses key fields.
+    Returns dict with taxonomy_category, summary, case_type, subject_chains.
+    """
+    categories = [
+        "Constitutional Law", "Administrative Law & Review", "Civil Procedure",
+        "Appeals & Review", "Contract Law", "Property Law",
+        "Family Law & Matrimonial", "Customary Law & Succession",
+        "Company & Commercial Law", "Employment & Labour Law", "Delict",
+        "Criminal Law & Procedure", "Revenue & Tax Law",
+        "Insolvency & Sequestration", "Intellectual Property",
+        "Environmental & Mining Law", "Human Rights"
+    ]
+    try:
+        preview = text[:3000]
+        msg = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=400,
+            messages=[{"role": "user", "content": f"""Analyse this Zimbabwe court judgment and return ONLY valid JSON:
+
+{{
+  "taxonomy_category": "one of the categories listed",
+  "summary": "one sentence describing the legal issue and outcome",
+  "case_type": "e.g. Urgent application / Appeal / Action / Review",
+  "subject_chains": ["up to 3 key legal principles as short phrases"]
+}}
+
+Categories: {', '.join(categories)}
+
+Judgment text (first 3000 chars):
+{preview}
+
+JSON only:"""}]
+        )
+        raw = msg.content[0].text
+        m = re.search(r'\{{[\s\S]*\}}', raw)
+        if m:
+            result = json.loads(m.group(0))
+            # Validate category
+            if result.get("taxonomy_category") not in categories:
+                result["taxonomy_category"] = "General"
+            return result
+    except Exception as e:
+        print(f"[zlr_classify] AI classification failed: {e}")
+    return {}
+
     # Parse the ZLR headnote structure
     parsed = parse_zlr_headnote(text)
+
+    # If category is General or summary is weak, use AI classifier
+    if parsed.get("taxonomy_category") == "General" or not parsed.get("summary") or len(parsed.get("subject_chains", [])) == 0:
+        ai_meta = await asyncio.to_thread(classify_case_with_ai, text, filename)
+        if ai_meta:
+            if ai_meta.get("taxonomy_category") and ai_meta["taxonomy_category"] != "General":
+                parsed["taxonomy_category"] = ai_meta["taxonomy_category"]
+            if ai_meta.get("summary") and not parsed.get("summary"):
+                parsed["summary"] = ai_meta["summary"]
+            if ai_meta.get("case_type") and not parsed.get("case_type"):
+                parsed["case_type"] = ai_meta["case_type"]
+            if ai_meta.get("subject_chains") and not parsed.get("subject_chains"):
+                parsed["subject_chains"] = ai_meta["subject_chains"]
 
     item_id = str(uuid.uuid4())
     jurisdiction = get_jurisdiction(source)
