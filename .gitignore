@@ -31,3 +31,4 @@ Thumbs.db
 *.docx
 !Mutemo_Desk_Briefing_for_Nyari.docx
 *.txt
+!requirements.txt
