@@ -1053,7 +1053,9 @@ async def upload_zlr_document(
     try:
         if ext == "pdf":
             text, page_count, ocr_used = extract_pdf_text(content)
-        elif ext in ("txt",):
+        elif ext in ("docx", "doc"):
+            text = extract_docx_text(content)
+        elif ext in ("txt", "rtf"):
             text = content.decode("utf-8", errors="replace")
         elif ext in ("jpg", "jpeg", "png", "webp"):
             # Image upload — run OCR directly
