@@ -1127,6 +1127,63 @@ async def upload_zlr_document(
             if ai_meta.get("subject_chains") and not parsed.get("subject_chains"):
                 parsed["subject_chains"] = ai_meta["subject_chains"]
 
+    item_id = str(uuid.uuid4())
+    jurisdiction = get_jurisdiction(source)
+    authority_weight = get_authority_weight(source)
+    item = {
+        "id": item_id,
+        "filename": filename,
+        "source": source,
+        "jurisdiction": jurisdiction,
+        "authority_weight": authority_weight,
+        "volume_year": volume_year,
+        "zimlii_url": zimlii_url or parsed.get("zimlii_url"),
+        "case_name": parsed.get("case_name") or filename,
+        "citation": parsed.get("citation"),
+        "judgment_number": parsed.get("judgment_number"),
+        "court": parsed.get("court"),
+        "judge": parsed.get("judge"),
+        "case_type": parsed.get("case_type"),
+        "hearing_date": parsed.get("hearing_date"),
+        "judgment_date": parsed.get("judgment_date"),
+        "subject_chains": parsed.get("subject_chains", []),
+        "taxonomy_category": parsed.get("taxonomy_category", "General"),
+        "summary": parsed.get("summary"),
+        "raw_text": text,
+        "word_count": len(text.split()),
+        "chunk_count": 0,
+        "ocr_used": ocr_used,
+        "uploaded_at": datetime.utcnow().isoformat(),
+    }
+    zlr_db[item_id] = item
+
+    enriched_text = f"""CASE: {item['case_name'] or ''}
+CITATION: {item['citation'] or ''}
+JUDGMENT: {item['judgment_number'] or ''}
+COURT: {item['court'] or ''}
+JUDGE: {item['judge'] or ''}
+CATEGORY: {item['taxonomy_category'] or ''}
+SUBJECT: {' | '.join(item['subject_chains'])}
+SUMMARY: {item['summary'] or ''}
+
+FULL TEXT:
+{text}"""
+
+    new_chunks = chunk_text(enriched_text, page_count, item_id, "zlr")
+    for c in new_chunks:
+        c["zlr_item_id"] = item_id
+        c["citation"] = item.get("citation")
+        c["case_name"] = item.get("case_name")
+        c["taxonomy_category"] = item.get("taxonomy_category")
+
+    zlr_chunks.extend(new_chunks)
+    item["chunk_count"] = len(new_chunks)
+    await asyncio.to_thread(index_chunks_in_chroma, new_chunks, "zlr")
+
+    save_state()
+    return item
+
+
 def classify_case_with_ai(text: str, filename: str) -> dict:
     """
     Use Claude Haiku to classify a case by category and extract a clean summary.
@@ -1167,7 +1224,6 @@ JSON only:"""}]
         m = re.search(r'\{{[\s\S]*\}}', raw)
         if m:
             result = json.loads(m.group(0))
-            # Validate category
             if result.get("taxonomy_category") not in categories:
                 result["taxonomy_category"] = "General"
             return result
@@ -1175,63 +1231,7 @@ JSON only:"""}]
         print(f"[zlr_classify] AI classification failed: {e}")
     return {}
 
-    item_id = str(uuid.uuid4())
-    jurisdiction = get_jurisdiction(source)
-    authority_weight = get_authority_weight(source)
-    item = {
-        "id": item_id,
-        "filename": filename,
-        "source": source,
-        "jurisdiction": jurisdiction,
-        "authority_weight": authority_weight,
-        "volume_year": volume_year,
-        "zimlii_url": zimlii_url or parsed.get("zimlii_url"),
-        "case_name": parsed.get("case_name") or filename,
-        "citation": parsed.get("citation"),
-        "judgment_number": parsed.get("judgment_number"),
-        "court": parsed.get("court"),
-        "judge": parsed.get("judge"),
-        "case_type": parsed.get("case_type"),
-        "hearing_date": parsed.get("hearing_date"),
-        "judgment_date": parsed.get("judgment_date"),
-        "subject_chains": parsed.get("subject_chains", []),
-        "taxonomy_category": parsed.get("taxonomy_category", "General"),
-        "summary": parsed.get("summary"),
-        "raw_text": text,
-        "word_count": len(text.split()),
-        "chunk_count": 0,
-        "ocr_used": ocr_used,
-        "uploaded_at": datetime.utcnow().isoformat(),
-    }
-    zlr_db[item_id] = item
 
-    # Chunk and index
-    # Each chunk gets enriched with ZLR metadata for better search context
-    enriched_text = f"""CASE: {item['case_name'] or ''}
-CITATION: {item['citation'] or ''}
-JUDGMENT: {item['judgment_number'] or ''}
-COURT: {item['court'] or ''}
-JUDGE: {item['judge'] or ''}
-CATEGORY: {item['taxonomy_category'] or ''}
-SUBJECT: {' | '.join(item['subject_chains'])}
-SUMMARY: {item['summary'] or ''}
-
-FULL TEXT:
-{text}"""
-
-    new_chunks = chunk_text(enriched_text, page_count, item_id, "zlr")
-    for c in new_chunks:
-        c["zlr_item_id"] = item_id
-        c["citation"] = item.get("citation")
-        c["case_name"] = item.get("case_name")
-        c["taxonomy_category"] = item.get("taxonomy_category")
-
-    zlr_chunks.extend(new_chunks)
-    item["chunk_count"] = len(new_chunks)
-    await asyncio.to_thread(index_chunks_in_chroma, new_chunks, "zlr")
-
-    save_state()
-    return item
 
 @app.delete("/api/zlr/{item_id}")
 async def delete_zlr_entry(item_id: str):
