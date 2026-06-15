@@ -2316,6 +2316,83 @@ Packer.toBuffer(doc).then(buf => {{ fs.writeFileSync('{output_path}', buf); }}).
 
 # ── Calendar ──────────────────────────────────────────────────────────────────
 
+class ExtractDatesRequest(BaseModel):
+    document_id: str
+    matter_id: Optional[str] = None
+
+@app.post("/api/extract-dates")
+async def extract_dates_from_document(req: ExtractDatesRequest):
+    """
+    Read a document from the vault and extract court dates, deadlines,
+    and obligations using Claude. Returns proposed calendar entries for
+    the user to confirm before adding.
+    """
+    doc = documents_db.get(req.document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Get the document text from chunks
+    doc_chunks = [c for c in chunks_db if c["document_id"] == req.document_id]
+    if not doc_chunks:
+        raise HTTPException(status_code=422, detail="No text found for this document")
+
+    full_text = " ".join(c["text"] for c in doc_chunks[:10])[:6000]
+    matter = matters_db.get(doc.get("matter_id", ""), {})
+    matter_name = matter.get("name", "")
+    today = datetime.utcnow().date().isoformat()
+
+    def extract_sync():
+        msg = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": f"""Extract all dates, deadlines, and obligations from this Zimbabwe court document.
+Today's date is {today}.
+
+Return ONLY valid JSON in this exact format, no other text:
+{{
+  "events": [
+    {{
+      "title": "brief description of the obligation or event",
+      "date": "YYYY-MM-DD",
+      "time": "HH:MM or null",
+      "event_type": "hearing|deadline|filing|other",
+      "court": "court name or null",
+      "notes": "any additional context"
+    }}
+  ]
+}}
+
+Only include events with specific dates. Ignore vague references like "within a reasonable time".
+Matter name: {matter_name}
+
+Document text:
+{full_text}
+
+JSON:"""}]
+        )
+        raw = msg.content[0].text.strip()
+        raw = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+        m = re.search(r'\{[\s\S]*\}', raw)
+        if m:
+            return json.loads(m.group(0))
+        return {"events": []}
+
+    try:
+        result = await asyncio.to_thread(extract_sync)
+        events = result.get("events", [])
+        # Add matter context to each event
+        for e in events:
+            if matter_name and not e.get("matter_name"):
+                e["matter_name"] = matter_name
+        return {
+            "document_id": req.document_id,
+            "filename": doc.get("filename", ""),
+            "events": events,
+            "count": len(events)
+        }
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"Date extraction failed: {ex}")
+
 @app.get("/api/calendar")
 async def list_events():
     return sorted(calendar_db, key=lambda x: (x["date"], x.get("time", "")))

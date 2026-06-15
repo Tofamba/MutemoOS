@@ -1104,6 +1104,31 @@ select{cursor:pointer}
   </div>
 </div>
 
+<!-- ═══════════════ DATE EXTRACTION MODAL ═══════════════ -->
+<div id="date-extract-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;overflow-y:auto">
+  <div style="background:white;max-width:600px;margin:2rem auto;border-radius:8px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
+    <div style="background:var(--green);color:white;padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-weight:700;font-size:1rem">📅 Dates Extracted from Document</div>
+        <div id="date-modal-filename" style="font-size:0.78rem;opacity:0.8;margin-top:2px"></div>
+      </div>
+      <button onclick="closeDateModal()" style="background:none;border:none;color:white;font-size:1.2rem;cursor:pointer">✕</button>
+    </div>
+    <div style="padding:1.25rem">
+      <div id="date-modal-status" class="status"></div>
+      <div id="date-modal-content">
+        <div style="text-align:center;padding:2rem;color:var(--ink3)">
+          <span class="spinner"></span> Reading document and extracting dates…
+        </div>
+      </div>
+      <div id="date-modal-actions" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;gap:0.5rem;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="closeDateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="addSelectedDates()" id="add-dates-btn">📅 Add Selected to Calendar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
 </div>
 
@@ -1242,7 +1267,7 @@ async function toggleMatter(id) {
           <div class="doc-item">
             <span>📄</span>
             <div style="flex:1">
-              <div class="doc-name">${d.filename}</div>
+              <div class="doc-name">${escHtml(d.filename)}</div>
               <div class="doc-meta">
                 ${d.document_type ? `<span class="chip chip-gray">${d.document_type.replace(/_/g,' ')}</span>` : ''}
                 ${d.doc_date ? `<span class="chip chip-blue">${d.doc_date}</span>` : ''}
@@ -1250,6 +1275,11 @@ async function toggleMatter(id) {
                 <span class="chip ${d.status==='complete'?'chip-green':d.status==='error'?'chip-red':'chip-gold'}">${d.status}</span>
               </div>
             </div>
+            ${d.status === 'complete' ? `
+            <button class="btn btn-sm btn-outline" onclick="extractDates('${d.id}', '${escHtml(d.filename)}')" 
+                    title="Extract court dates and deadlines from this document">
+              📅 Extract Dates
+            </button>` : ''}
           </div>
         `).join('');
       }
@@ -2379,6 +2409,134 @@ async function reclassifyZlr() {
 async function deleteZlrEntry(id) {
   await fetch(`${API}/api/zlr/${id}`, {method:'DELETE'});
   renderZlrTab();
+}
+
+// ── Date Extraction ───────────────────────────────────────────────────────────
+let extractedDates = [];
+
+async function extractDates(docId, filename) {
+  // Show modal
+  document.getElementById('date-extract-modal').style.display = 'block';
+  document.getElementById('date-modal-filename').textContent = filename;
+  document.getElementById('date-modal-content').innerHTML = `
+    <div style="text-align:center;padding:2rem;color:var(--ink3)">
+      <span class="spinner"></span> Reading document and extracting dates…
+    </div>`;
+  document.getElementById('date-modal-actions').style.display = 'none';
+  extractedDates = [];
+
+  try {
+    const res = await fetch(`${API}/api/extract-dates`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ document_id: docId })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+    const data = await res.json();
+
+    if (!data.events.length) {
+      document.getElementById('date-modal-content').innerHTML = `
+        <div class="empty-state" style="padding:1.5rem">
+          <p>No specific dates or deadlines found in this document.</p>
+          <p style="font-size:0.78rem;color:var(--ink3);margin-top:0.5rem">The document may not contain court orders with specific due dates.</p>
+        </div>`;
+      return;
+    }
+
+    extractedDates = data.events;
+
+    const EVENT_ICONS = { hearing: '⚖', deadline: '⏰', filing: '📋', other: '📅' };
+
+    document.getElementById('date-modal-content').innerHTML = `
+      <p style="font-size:0.82rem;color:var(--ink2);margin-bottom:1rem">
+        Found <strong>${data.events.length}</strong> date${data.events.length !== 1 ? 's' : ''}.
+        Select which ones to add to your calendar:
+      </p>
+      ${data.events.map((e, i) => `
+        <div style="border:1px solid var(--border);border-radius:6px;padding:0.75rem;margin-bottom:0.5rem;cursor:pointer"
+             id="date-card-${i}" onclick="toggleDateCard(${i})">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <input type="checkbox" id="date-check-${i}" checked
+                   style="margin-top:3px;flex-shrink:0;width:16px;height:16px;cursor:pointer"
+                   onclick="event.stopPropagation()">
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:0.88rem">
+                ${EVENT_ICONS[e.event_type] || '📅'} ${escHtml(e.title)}
+              </div>
+              <div style="margin-top:4px">
+                <span class="chip chip-green">${escHtml(e.date)}</span>
+                ${e.time ? `<span class="chip chip-gray">${escHtml(e.time)}</span>` : ''}
+                <span class="chip chip-blue">${escHtml(e.event_type)}</span>
+                ${e.court ? `<span class="chip chip-gray">${escHtml(e.court)}</span>` : ''}
+              </div>
+              ${e.notes ? `<div style="font-size:0.72rem;color:var(--ink3);margin-top:4px">${escHtml(e.notes)}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    `;
+    document.getElementById('date-modal-actions').style.display = 'flex';
+  } catch(e) {
+    document.getElementById('date-modal-content').innerHTML = `
+      <div class="status show error">Failed to extract dates: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function toggleDateCard(i) {
+  const cb = document.getElementById(`date-check-${i}`);
+  cb.checked = !cb.checked;
+}
+
+async function addSelectedDates() {
+  const btn = document.getElementById('add-dates-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Adding…';
+
+  const selected = extractedDates.filter((_, i) => {
+    const cb = document.getElementById(`date-check-${i}`);
+    return cb && cb.checked;
+  });
+
+  if (!selected.length) {
+    document.getElementById('date-modal-status').innerHTML = 'No dates selected.';
+    document.getElementById('date-modal-status').className = 'status show error';
+    btn.disabled = false;
+    btn.innerHTML = '📅 Add Selected to Calendar';
+    return;
+  }
+
+  let added = 0;
+  for (const e of selected) {
+    try {
+      await fetch(`${API}/api/calendar`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          title: e.title,
+          date: e.date,
+          time: e.time || null,
+          event_type: e.event_type || 'other',
+          court: e.court || null,
+          matter_name: e.matter_name || null,
+          notes: e.notes || null,
+        })
+      });
+      added++;
+    } catch(err) {}
+  }
+
+  closeDateModal();
+  // Show success notification
+  const notif = document.createElement('div');
+  notif.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:var(--green);color:white;padding:0.75rem 1.25rem;border-radius:6px;font-size:0.85rem;font-weight:600;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.2)';
+  notif.textContent = `✓ ${added} date${added !== 1 ? 's' : ''} added to calendar`;
+  document.body.appendChild(notif);
+  setTimeout(() => notif.remove(), 4000);
+}
+
+function closeDateModal() {
+  document.getElementById('date-extract-modal').style.display = 'none';
+  extractedDates = [];
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
