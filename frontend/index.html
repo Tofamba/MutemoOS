@@ -1134,6 +1134,10 @@ select{cursor:pointer}
 
 <script>
 const API = '';  // relative — works on localhost and when hosted (frontend served by same app)
+
+// Wrap fetch to always include credentials (needed for Basic Auth)
+const _fetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => _fetch(url, { credentials: 'include', ...opts });
 let matters = [];
 let pendingFiles = [];
 let selectedMatterId = null;
