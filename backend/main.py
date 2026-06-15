@@ -1111,6 +1111,22 @@ async def upload_zlr_document(
     if not text:
         raise HTTPException(status_code=422, detail="Could not extract text from document. Try a clearer photo or PDF.")
 
+    # Parse the ZLR headnote structure
+    parsed = parse_zlr_headnote(text)
+
+    # If category is General or summary is weak, use AI classifier
+    if parsed.get("taxonomy_category") == "General" or not parsed.get("summary") or len(parsed.get("subject_chains", [])) == 0:
+        ai_meta = await asyncio.to_thread(classify_case_with_ai, text, filename)
+        if ai_meta:
+            if ai_meta.get("taxonomy_category") and ai_meta["taxonomy_category"] != "General":
+                parsed["taxonomy_category"] = ai_meta["taxonomy_category"]
+            if ai_meta.get("summary") and not parsed.get("summary"):
+                parsed["summary"] = ai_meta["summary"]
+            if ai_meta.get("case_type") and not parsed.get("case_type"):
+                parsed["case_type"] = ai_meta["case_type"]
+            if ai_meta.get("subject_chains") and not parsed.get("subject_chains"):
+                parsed["subject_chains"] = ai_meta["subject_chains"]
+
 def classify_case_with_ai(text: str, filename: str) -> dict:
     """
     Use Claude Haiku to classify a case by category and extract a clean summary.
@@ -1158,22 +1174,6 @@ JSON only:"""}]
     except Exception as e:
         print(f"[zlr_classify] AI classification failed: {e}")
     return {}
-
-    # Parse the ZLR headnote structure
-    parsed = parse_zlr_headnote(text)
-
-    # If category is General or summary is weak, use AI classifier
-    if parsed.get("taxonomy_category") == "General" or not parsed.get("summary") or len(parsed.get("subject_chains", [])) == 0:
-        ai_meta = await asyncio.to_thread(classify_case_with_ai, text, filename)
-        if ai_meta:
-            if ai_meta.get("taxonomy_category") and ai_meta["taxonomy_category"] != "General":
-                parsed["taxonomy_category"] = ai_meta["taxonomy_category"]
-            if ai_meta.get("summary") and not parsed.get("summary"):
-                parsed["summary"] = ai_meta["summary"]
-            if ai_meta.get("case_type") and not parsed.get("case_type"):
-                parsed["case_type"] = ai_meta["case_type"]
-            if ai_meta.get("subject_chains") and not parsed.get("subject_chains"):
-                parsed["subject_chains"] = ai_meta["subject_chains"]
 
     item_id = str(uuid.uuid4())
     jurisdiction = get_jurisdiction(source)
