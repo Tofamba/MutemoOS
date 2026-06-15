@@ -1038,6 +1038,12 @@ select{cursor:pointer}
             <p style="font-size:0.82rem;color:var(--ink3)">No cases indexed yet. Start by uploading ZLR headnotes or ZimLII judgments.</p>
           </div>
         </div>
+        <div style="padding:0.75rem 1rem;border-top:1px solid var(--border)">
+          <button class="btn btn-outline btn-sm" onclick="reclassifyZlr()" id="reclassify-btn">
+            🔄 Reclassify General cases with AI
+          </button>
+          <div id="reclassify-status" class="status" style="margin-top:0.4rem"></div>
+        </div>
       </div>
 
       <!-- Recent entries -->
@@ -2236,6 +2242,27 @@ async function searchZlr() {
     `;
   } catch(e) {
     el.innerHTML = `<div class="status show error">Search failed: ${e.message}</div>`;
+  }
+}
+
+async function reclassifyZlr() {
+  const btn = document.getElementById('reclassify-btn');
+  const status = document.getElementById('reclassify-status');
+  btn.disabled = true;
+  status.innerHTML = '<span class="spinner"></span> Running AI classifier on General cases…';
+  status.className = 'status show loading';
+  try {
+    const res = await fetch(`${API}/api/admin/reclassify-zlr`, {method:'POST'});
+    if (!res.ok) throw new Error('Failed');
+    const data = await res.json();
+    status.innerHTML = `✓ Done — ${data.updated} case${data.updated!==1?'s':''} reclassified${data.failed ? `, ${data.failed} failed` : ''}.`;
+    status.className = 'status show success';
+    await renderZlrTab();
+  } catch(e) {
+    status.innerHTML = `Error: ${e.message}`;
+    status.className = 'status show error';
+  } finally {
+    btn.disabled = false;
   }
 }
 
