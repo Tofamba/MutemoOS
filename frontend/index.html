@@ -986,6 +986,48 @@ select{cursor:pointer}
         </div>
       </div>
 
+      <!-- Bulk Import -->
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <div class="card-icon">📦</div>
+          <div><div class="card-title">Bulk Import — Cases Decided Digest</div><div class="card-desc">Upload a ZLR digest — imports all cases at once</div></div>
+        </div>
+        <div class="card-body">
+          <div id="bulk-import-status" class="status"></div>
+          <p style="font-size:0.78rem;color:var(--ink2);margin-bottom:0.75rem">Upload a ZLR "Cases Decided" DOCX or PDF. The system parses every case individually — extracting judgment numbers, courts, judges, subject chains, and summaries — and indexes them all in one operation.</p>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Source</label>
+              <select id="bulk-source">
+                <option value="ZLR">Zimbabwe Law Reports</option>
+                <option value="ZimLII">ZimLII digest</option>
+                <option value="SALR">South African Law Reports</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Period / Volume</label>
+              <input type="text" id="bulk-volume" placeholder="e.g. July–Dec 2016"/>
+            </div>
+          </div>
+          <div class="upload-zone" id="bulk-upload-zone"
+               onclick="document.getElementById('bulk-file-input').click()"
+               ondrop="handleBulkDrop(event)"
+               ondragover="handleDragOver(event)"
+               ondragleave="handleDragLeave(event)">
+            <div style="font-size:2rem">📚</div>
+            <strong style="font-size:0.88rem">Drop "Cases Decided" file here</strong>
+            <p>DOCX or PDF</p>
+            <input type="file" id="bulk-file-input" style="display:none"
+                   accept=".docx,.doc,.pdf"
+                   onchange="handleBulkFileSelect(event)"/>
+          </div>
+          <div id="bulk-pending" style="margin-top:0.5rem"></div>
+          <button class="btn btn-primary" id="bulk-import-btn" onclick="runBulkImport()" disabled style="margin-top:0.5rem">
+            📦 Import All Cases
+          </button>
+        </div>
+      </div>
+
       <!-- ZLR Search -->
       <div class="card" style="margin-top:1rem">
         <div class="card-header">
@@ -2052,6 +2094,74 @@ function showDraftStatus(msg, type) {
 }
 
 document.getElementById('draft-editor')?.addEventListener('input', updateDraftWordCount);
+
+// ── Bulk Import ───────────────────────────────────────────────────────────────
+let bulkPendingFile = null;
+
+function handleBulkDrop(e) {
+  e.preventDefault();
+  document.getElementById('bulk-upload-zone').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) setBulkFile(f);
+}
+function handleBulkFileSelect(e) {
+  const f = e.target.files[0];
+  if (f) setBulkFile(f);
+}
+function setBulkFile(file) {
+  bulkPendingFile = file;
+  document.getElementById('bulk-pending').innerHTML = `
+    <div class="upload-item">
+      <span>📚</span>
+      <span class="name">${escHtml(file.name)}</span>
+      <span style="font-size:0.7rem;color:var(--ink3)">${(file.size/1024).toFixed(0)} KB</span>
+      <button class="btn btn-sm" style="background:none;color:var(--ink3)"
+        onclick="bulkPendingFile=null;document.getElementById('bulk-pending').innerHTML='';document.getElementById('bulk-import-btn').disabled=true">✕</button>
+    </div>`;
+  document.getElementById('bulk-import-btn').disabled = false;
+}
+
+async function runBulkImport() {
+  if (!bulkPendingFile) return;
+  const btn = document.getElementById('bulk-import-btn');
+  btn.disabled = true;
+  showBulkStatus('<span class="spinner"></span> Parsing and indexing all cases — this may take 30–60 seconds…', 'loading');
+
+  try {
+    const fd = new FormData();
+    fd.append('file', bulkPendingFile);
+    fd.append('source', document.getElementById('bulk-source').value);
+    const vol = document.getElementById('bulk-volume').value.trim();
+    if (vol) fd.append('volume_year', vol);
+
+    const res = await fetch(`${API}/api/zlr/bulk-import`, {method:'POST', body: fd});
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Import failed'); }
+    const data = await res.json();
+
+    bulkPendingFile = null;
+    document.getElementById('bulk-pending').innerHTML = '';
+    document.getElementById('bulk-volume').value = '';
+
+    const catSummary = Object.entries(data.categories)
+      .sort((a,b) => b[1]-a[1])
+      .map(([k,v]) => `${k}: ${v}`)
+      .join(' · ');
+
+    showBulkStatus(`✓ Imported ${data.imported} cases — ${catSummary}`, 'success');
+    await renderZlrTab();
+  } catch(e) {
+    showBulkStatus(`Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = !bulkPendingFile;
+  }
+}
+
+function showBulkStatus(msg, type) {
+  const el = document.getElementById('bulk-import-status');
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+  if (type === 'success') setTimeout(() => el.classList.remove('show'), 8000);
+}
 
 // ── ZLR Index ─────────────────────────────────────────────────────────────────
 let zlrPendingFile = null;

@@ -1297,6 +1297,199 @@ JSON:"""}]
     return {"taxonomy_category": best_category if best_score > 0 else "General",
             "summary": None, "case_type": None, "subject_chains": []}
 
+def parse_zlr_subject_index(text: str, source: str = "ZLR", volume_year: str = None) -> list:
+    """
+    Parse a ZLR 'Cases Decided' subject index document into individual case entries.
+    Handles the format: subject chain line(s), then case name + judgment number, then summary.
+    Returns a list of structured case dicts ready for ZLR indexing.
+    """
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    cases = []
+    current_subject_chains = []
+
+    court_map = {
+        'HH': 'High Court, Harare',
+        'HB': 'High Court, Bulawayo',
+        'SC': 'Supreme Court of Zimbabwe',
+        'CC': 'Constitutional Court of Zimbabwe',
+        'HM': 'High Court, Masvingo',
+        'HMT': 'High Court, Mutare',
+        'LC': 'Labour Court',
+        'ZWSC': 'Supreme Court of Zimbabwe',
+        'ZWCC': 'Constitutional Court of Zimbabwe',
+        'ZWHHC': 'High Court, Harare',
+        'ZWBHC': 'High Court, Bulawayo',
+        'ZWMSVHC': 'High Court, Masvingo',
+    }
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Skip title lines and cross-reference lines
+        if line.startswith('See ') or line.startswith('CASES DECIDED') or len(line) < 10:
+            i += 1
+            continue
+
+        # Detect subject chain line
+        is_subject_chain = (
+            ' – ' in line and
+            not line.startswith('Held:') and
+            not line.startswith('The ') and
+            not line.startswith('A ') and
+            not line.startswith('An ') and
+            not line.startswith('In ') and
+            not re.search(r'[A-Z]{2,4}-\d+-\d+', line)
+        )
+
+        if is_subject_chain:
+            current_subject_chains.append(line)
+            i += 1
+            continue
+
+        # Detect case reference line — contains judgment number
+        jnum_match = re.search(r'([A-Z]{2,4}-\d+-\d+)', line)
+        if jnum_match and current_subject_chains:
+            judgment_number = jnum_match.group(1)
+            prefix = re.match(r'([A-Z]+)', judgment_number).group(1)
+            court = court_map.get(prefix, 'High Court of Zimbabwe')
+
+            # Case name = everything before judgment number
+            case_name = line[:line.find(judgment_number)].strip().rstrip('( ')
+
+            # Judge
+            judge_match = re.search(r'\(([^(]*(?:J[A-Z]*|CJ|DCJ))\)', line)
+            judge = judge_match.group(1).strip() if judge_match else None
+
+            # Date
+            date_match = re.search(r'(?:judgment delivered|decided|dated)\s+(\d+\s+\w+\s+\d{4})', line, re.IGNORECASE)
+            judgment_date = date_match.group(1) if date_match else None
+
+            # Collect summary from following lines
+            summary_parts = []
+            j = i + 1
+            while j < len(lines) and len(summary_parts) < 4:
+                next_line = lines[j]
+                if re.search(r'[A-Z]{2,4}-\d+-\d+', next_line):
+                    break
+                if ' – ' in next_line and not next_line.startswith('Held:'):
+                    break
+                if next_line.startswith('See below') or next_line.startswith('See above'):
+                    j += 1
+                    continue
+                if len(next_line) > 40:
+                    summary_parts.append(next_line)
+                j += 1
+
+            # Classify using subject chains
+            chains_text = ' '.join(current_subject_chains).lower()
+            taxonomy = classify_zlr_subject(current_subject_chains)
+
+            cases.append({
+                'case_name': case_name or f"Case {judgment_number}",
+                'judgment_number': judgment_number,
+                'court': court,
+                'judge': judge,
+                'judgment_date': judgment_date,
+                'subject_chains': list(current_subject_chains),
+                'taxonomy_category': taxonomy,
+                'summary': ' '.join(summary_parts)[:600] if summary_parts else None,
+                'citation': None,
+                'source': source,
+                'volume_year': volume_year,
+                'jurisdiction': get_jurisdiction(source),
+                'authority_weight': get_authority_weight(source),
+            })
+            current_subject_chains = []
+
+        i += 1
+
+    return cases
+
+@app.post("/api/zlr/bulk-import")
+async def bulk_import_zlr(
+    file: UploadFile = File(...),
+    source: str = Form("ZLR"),
+    volume_year: Optional[str] = Form(None),
+):
+    """
+    Bulk import a ZLR 'Cases Decided' subject index document.
+    Parses into individual case entries — one per judgment — and indexes all of them.
+    """
+    content = await file.read()
+    filename = file.filename or "zlr_index"
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "bin"
+
+    # Extract text
+    try:
+        if ext in ("docx", "doc"):
+            text = extract_docx_text(content)
+        elif ext == "pdf":
+            text, _, _ = extract_pdf_text(content)
+        elif ext in ("txt",):
+            text = content.decode("utf-8", errors="replace")
+        else:
+            raise HTTPException(status_code=422, detail=f"Unsupported file type: {ext}")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not extract text: {e}")
+
+    if not text:
+        raise HTTPException(status_code=422, detail="No text extracted from document")
+
+    # Parse into individual cases
+    parsed_cases = await asyncio.to_thread(parse_zlr_subject_index, text, source, volume_year)
+
+    if not parsed_cases:
+        raise HTTPException(status_code=422, detail="No cases could be parsed from this document. Ensure it is a ZLR subject index format.")
+
+    # Index each case
+    imported = 0
+    all_chunks = []
+    for case in parsed_cases:
+        item_id = str(uuid.uuid4())
+        case["id"] = item_id
+        case["filename"] = f"{case['case_name']} [{case['judgment_number']}]"
+        case["word_count"] = len((case.get("summary") or "").split())
+        case["chunk_count"] = 0
+        case["ocr_used"] = False
+        case["uploaded_at"] = datetime.utcnow().isoformat()
+        case["raw_text"] = f"""CASE: {case['case_name']}
+JUDGMENT: {case['judgment_number']}
+COURT: {case['court']}
+JUDGE: {case.get('judge') or ''}
+DATE: {case.get('judgment_date') or ''}
+CATEGORY: {case['taxonomy_category']}
+SUBJECT: {' | '.join(case['subject_chains'])}
+SUMMARY: {case.get('summary') or ''}"""
+
+        zlr_db[item_id] = case
+
+        new_chunks = chunk_text(case["raw_text"], 1, item_id, "zlr")
+        for c in new_chunks:
+            c["zlr_item_id"] = item_id
+            c["citation"] = case.get("citation")
+            c["case_name"] = case.get("case_name")
+            c["taxonomy_category"] = case.get("taxonomy_category")
+        zlr_chunks.extend(new_chunks)
+        case["chunk_count"] = len(new_chunks)
+        all_chunks.extend(new_chunks)
+        imported += 1
+
+    # Index all chunks in ChromaDB in one batch
+    await asyncio.to_thread(index_chunks_in_chroma, all_chunks, "zlr")
+    save_state()
+
+    # Return category breakdown
+    from collections import Counter
+    categories = Counter(c["taxonomy_category"] for c in parsed_cases)
+
+    return {
+        "imported": imported,
+        "total_parsed": len(parsed_cases),
+        "categories": dict(categories),
+        "source": source,
+        "volume_year": volume_year,
+    }
 
 
 @app.delete("/api/zlr/{item_id}")
