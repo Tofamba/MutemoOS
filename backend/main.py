@@ -197,8 +197,9 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 STATE_FILE = os.path.join(DATA_DIR, "mutemo_state.json")
 
 def save_state():
-    """Persist all in-memory stores to a JSON file on disk."""
+    """Persist all in-memory stores to a JSON file on disk, with backup rotation."""
     try:
+        import shutil, glob
         os.makedirs(DATA_DIR, exist_ok=True)
         state = {
             "matters_db": matters_db,
@@ -211,6 +212,13 @@ def save_state():
             "zlr_chunks": zlr_chunks,
             "reminder_settings": reminder_settings,
         }
+        # Keep last 3 backups before overwriting
+        if os.path.exists(STATE_FILE):
+            backup = os.path.join(DATA_DIR, f"mutemo_state_{datetime.utcnow():%Y%m%d_%H%M%S}.json")
+            shutil.copy2(STATE_FILE, backup)
+            old_backups = sorted(glob.glob(os.path.join(DATA_DIR, "mutemo_state_2*.json")))
+            for old in old_backups[:-3]:
+                os.remove(old)
         tmp_path = STATE_FILE + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False)
