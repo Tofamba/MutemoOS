@@ -1186,7 +1186,7 @@ FULL TEXT:
 
 def classify_case_with_ai(text: str, filename: str) -> dict:
     """
-    Use Claude Haiku to classify a case by category and extract a clean summary.
+    Use Claude to classify a case by category and extract a clean summary.
     Used when the simple keyword parser returns 'General' or misses key fields.
     Returns dict with taxonomy_category, summary, case_type, subject_chains.
     """
@@ -1199,37 +1199,90 @@ def classify_case_with_ai(text: str, filename: str) -> dict:
         "Insolvency & Sequestration", "Intellectual Property",
         "Environmental & Mining Law", "Human Rights"
     ]
+
+    # Also try keyword-based classification on full text as primary fallback
+    text_lower = text.lower()
+    keyword_map = {
+        "Employment & Labour Law": ["labour court", "labour act", "unfair dismissal", "retrenchment",
+                                     "disciplinary", "employment", "worker", "employee", "nec",
+                                     "reinstatement", "wrongful dismissal", "condonation", "leave to appeal"],
+        "Appeals & Review": ["appeal", "notice of appeal", "condonation", "leave to appeal",
+                              "extension of time", "prospects of success", "court a quo"],
+        "Administrative Law & Review": ["review", "administrative", "minister", "registrar",
+                                         "public service", "zimra", "revenue authority"],
+        "Constitutional Law": ["constitutional court", "constitution", "declaration of rights",
+                                "s 167", "s 85", "direct access", "fundamental rights"],
+        "Property Law": ["deeds", "transfer", "immoveable", "eviction", "lease", "mortgage",
+                          "rei vindicatio", "spoliation", "title deed"],
+        "Contract Law": ["contract", "breach", "damages", "specific performance", "agreement",
+                          "misrepresentation", "cancellation"],
+        "Revenue & Tax Law": ["zimra", "tax", "revenue", "vat", "income tax", "capital gains",
+                               "customs", "fiscal"],
+        "Civil Procedure": ["urgent", "interdict", "chamber application", "rule nisi",
+                              "costs", "summary judgment", "default judgment"],
+        "Family Law & Matrimonial": ["divorce", "matrimonial", "custody", "maintenance",
+                                      "division of assets", "spouse"],
+        "Criminal Law & Procedure": ["criminal", "accused", "prosecution", "bail",
+                                      "sentence", "guilty", "conviction"],
+        "Insolvency & Sequestration": ["liquidation", "winding up", "insolvency",
+                                        "liquidator", "creditor", "sequestration"],
+        "Company & Commercial Law": ["company", "director", "shareholder", "cobe",
+                                      "business", "corporate", "commercial"],
+    }
+
+    best_category = "General"
+    best_score = 0
+    for category, keywords in keyword_map.items():
+        score = sum(1 for kw in keywords if kw in text_lower)
+        if score > best_score:
+            best_score = score
+            best_category = category
+
+    if best_score >= 2:
+        # Confident enough from keywords alone
+        return {
+            "taxonomy_category": best_category,
+            "summary": None,
+            "case_type": None,
+            "subject_chains": [],
+        }
+
+    # Fall back to AI for ambiguous cases
     try:
         preview = text[:3000]
         msg = client.messages.create(
-            model="claude-haiku-4-5",
+            model="claude-sonnet-4-5",
             max_tokens=400,
-            messages=[{"role": "user", "content": f"""Analyse this Zimbabwe court judgment and return ONLY valid JSON:
+            messages=[{"role": "user", "content": f"""Analyse this Zimbabwe court judgment and return ONLY valid JSON with no other text:
 
 {{
-  "taxonomy_category": "one of the categories listed",
+  "taxonomy_category": "pick exactly one category from the list",
   "summary": "one sentence describing the legal issue and outcome",
-  "case_type": "e.g. Urgent application / Appeal / Action / Review",
+  "case_type": "e.g. Appeal / Application / Review / Action",
   "subject_chains": ["up to 3 key legal principles as short phrases"]
 }}
 
 Categories: {', '.join(categories)}
 
-Judgment text (first 3000 chars):
+Text:
 {preview}
 
-JSON only:"""}]
+JSON:"""}]
         )
-        raw = msg.content[0].text
-        m = re.search(r'\{{[\s\S]*\}}', raw)
+        raw = msg.content[0].text.strip()
+        # Strip markdown code blocks if present
+        raw = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+        m = re.search(r'\{[\s\S]*\}', raw)
         if m:
             result = json.loads(m.group(0))
             if result.get("taxonomy_category") not in categories:
-                result["taxonomy_category"] = "General"
+                result["taxonomy_category"] = best_category if best_score > 0 else "General"
             return result
     except Exception as e:
         print(f"[zlr_classify] AI classification failed: {e}")
-    return {}
+
+    return {"taxonomy_category": best_category if best_score > 0 else "General",
+            "summary": None, "case_type": None, "subject_chains": []}
 
 
 
