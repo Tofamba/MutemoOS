@@ -1203,31 +1203,44 @@ def classify_case_with_ai(text: str, filename: str) -> dict:
     # Also try keyword-based classification on full text as primary fallback
     text_lower = text.lower()
     keyword_map = {
-        "Employment & Labour Law": ["labour court", "labour act", "unfair dismissal", "retrenchment",
-                                     "disciplinary", "employment", "worker", "employee", "nec",
-                                     "reinstatement", "wrongful dismissal", "condonation", "leave to appeal"],
-        "Appeals & Review": ["appeal", "notice of appeal", "condonation", "leave to appeal",
-                              "extension of time", "prospects of success", "court a quo"],
-        "Administrative Law & Review": ["review", "administrative", "minister", "registrar",
-                                         "public service", "zimra", "revenue authority"],
-        "Constitutional Law": ["constitutional court", "constitution", "declaration of rights",
-                                "s 167", "s 85", "direct access", "fundamental rights"],
-        "Property Law": ["deeds", "transfer", "immoveable", "eviction", "lease", "mortgage",
-                          "rei vindicatio", "spoliation", "title deed"],
-        "Contract Law": ["contract", "breach", "damages", "specific performance", "agreement",
-                          "misrepresentation", "cancellation"],
-        "Revenue & Tax Law": ["zimra", "tax", "revenue", "vat", "income tax", "capital gains",
-                               "customs", "fiscal"],
-        "Civil Procedure": ["urgent", "interdict", "chamber application", "rule nisi",
-                              "costs", "summary judgment", "default judgment"],
-        "Family Law & Matrimonial": ["divorce", "matrimonial", "custody", "maintenance",
-                                      "division of assets", "spouse"],
-        "Criminal Law & Procedure": ["criminal", "accused", "prosecution", "bail",
-                                      "sentence", "guilty", "conviction"],
-        "Insolvency & Sequestration": ["liquidation", "winding up", "insolvency",
-                                        "liquidator", "creditor", "sequestration"],
-        "Company & Commercial Law": ["company", "director", "shareholder", "cobe",
-                                      "business", "corporate", "commercial"],
+        "Revenue & Tax Law": ["zimra", "zimbabwe revenue authority", "income tax act",
+                               "value added tax", "vat", "capital gains tax", "customs duty",
+                               "fiscus", "tax assessment", "commissioner of taxes"],
+        "Constitutional Law": ["constitutional court", "s 167", "s 85", "s 44",
+                                "direct access", "declaration of rights", "bill of rights",
+                                "constitutionality", "zwcc", "constitutional"],
+        "Property Law": ["deeds registry", "deed of transfer", "immoveable property",
+                          "rei vindicatio", "spoliation", "eviction", "lease agreement",
+                          "mortgage bond", "title deed", "conveyancing", "transfer duty"],
+        "Family Law & Matrimonial": ["divorce", "matrimonial causes", "custody",
+                                      "maintenance", "division of assets", "matrimonial home",
+                                      "lobola", "customary marriage", "spouse"],
+        "Administrative Law & Review": ["judicial review", "administrative court",
+                                         "minister of public service", "registrar of labour",
+                                         "public service commission", "ultra vires",
+                                         "legitimate expectation", "audi alteram partem"],
+        "Contract Law": ["breach of contract", "specific performance", "cancellation of contract",
+                          "misrepresentation", "undue influence", "coercion", "void contract",
+                          "declaratory order", "contractual", "agreement of sale"],
+        "Insolvency & Sequestration": ["liquidation", "winding up", "provisional liquidator",
+                                        "final liquidation", "concursus creditorum",
+                                        "insolvent", "sequestration", "business rescue"],
+        "Criminal Law & Procedure": ["criminal", "accused", "prosecution", "bail application",
+                                      "sentence", "guilty plea", "conviction", "murder",
+                                      "robbery", "fraud", "corruption"],
+        "Company & Commercial Law": ["company act", "cobe act", "director", "shareholder",
+                                      "winding up order", "corporate", "piercing the veil",
+                                      "board of directors", "memorandum of association"],
+        "Employment & Labour Law": ["labour act", "labour relations act", "unfair dismissal",
+                                     "retrenchment", "disciplinary hearing", "nec",
+                                     "works council", "reinstatement", "wrongful dismissal",
+                                     "employment contract", "labour officer"],
+        "Appeals & Review": ["condonation for late noting", "extension of time",
+                              "prospects of success on appeal", "leave to appeal",
+                              "court a quo", "appeal against", "noting of appeal"],
+        "Civil Procedure": ["urgent chamber application", "rule nisi", "interdict",
+                             "spoliation order", "summary judgment", "default judgment",
+                             "exception", "special plea", "costs de bonis propriis"],
     }
 
     best_category = "General"
@@ -1238,7 +1251,7 @@ def classify_case_with_ai(text: str, filename: str) -> dict:
             best_score = score
             best_category = category
 
-    if best_score >= 2:
+    if best_score >= 3:
         # Confident enough from keywords alone
         return {
             "taxonomy_category": best_category,
