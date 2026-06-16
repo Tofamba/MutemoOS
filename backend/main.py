@@ -94,8 +94,11 @@ async def basic_auth_middleware(request, call_next):
     if not MUTEMO_PASSWORD:
         return await call_next(request)  # auth disabled — no password configured
 
-    # Allow health check without auth (useful for monitoring)
-    if request.url.path == "/api/health":
+    # Allow health check and internal API calls without auth
+    if request.url.path in ("/api/health", "/api/extract-dates",
+                             "/api/search", "/api/calendar",
+                             "/api/matters", "/api/generate-affidavit",
+                             "/api/generate-document"):
         return await call_next(request)
 
     auth_header = request.headers.get("authorization")
