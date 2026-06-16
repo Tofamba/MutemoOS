@@ -307,7 +307,7 @@ select{cursor:pointer}
       <div class="card">
         <div class="card-header">
           <div class="card-icon">⬆</div>
-          <div><div class="card-title">Upload Documents</div><div class="card-desc">PDF, DOCX, TXT, EML supported</div></div>
+          <div><div class="card-title">Upload Documents</div><div class="card-desc">PDF, Word, Excel, TXT, EML supported</div></div>
         </div>
         <div class="card-body">
           <div id="vault-status" class="status"></div>
@@ -315,8 +315,8 @@ select{cursor:pointer}
                ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
             <div style="font-size:2rem">📎</div>
             <strong style="font-size:0.88rem">Drop files here or click to browse</strong>
-            <p>PDF, DOCX, TXT, EML</p>
-            <input type="file" id="file-input" style="display:none" multiple accept=".pdf,.docx,.doc,.txt,.eml,.msg" onchange="handleFileSelect(event)"/>
+            <p>PDF, Word (.docx/.doc), Excel (.xlsx), TXT, EML</p>
+            <input type="file" id="file-input" style="display:none" multiple accept=".pdf,.docx,.doc,.xlsx,.xlsm,.txt,.eml,.msg" onchange="handleFileSelect(event)"/>
           </div>
           <div class="upload-list" id="upload-list"></div>
           <button class="btn btn-primary" id="upload-btn" onclick="processUploads()" disabled>
@@ -2494,7 +2494,6 @@ function toggleDateCard(i) {
 async function addSelectedDates() {
   const btn = document.getElementById('add-dates-btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Adding…';
 
   const selected = extractedDates.filter((_, i) => {
     const cb = document.getElementById(`date-check-${i}`);
@@ -2510,9 +2509,23 @@ async function addSelectedDates() {
   }
 
   let added = 0;
-  for (const e of selected) {
+  let failed = 0;
+
+  for (let i = 0; i < selected.length; i++) {
+    const e = selected[i];
+    btn.innerHTML = `<span class="spinner"></span> Adding ${i+1} of ${selected.length}…`;
+
+    // Validate date format before sending — skip anything that isn't a real date
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date)) {
+      failed++;
+      continue;
+    }
+
     try {
-      await fetch(`${API}/api/calendar`, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout per request
+
+      const res = await fetch(`${API}/api/calendar`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -2523,16 +2536,23 @@ async function addSelectedDates() {
           court: e.court || null,
           matter_name: e.matter_name || null,
           notes: e.notes || null,
-        })
+        }),
+        signal: controller.signal,
       });
-      added++;
-    } catch(err) {}
+      clearTimeout(timeoutId);
+      if (res.ok) { added++; } else { failed++; }
+    } catch(err) {
+      failed++;
+    }
   }
 
   closeDateModal();
-  // Show success notification
   const notif = document.createElement('div');
-  notif.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:var(--green);color:white;padding:0.75rem 1.25rem;border-radius:6px;font-size:0.85rem;font-weight:600;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.2)';
+  const msg = failed > 0
+    ? `✓ ${added} date${added !== 1 ? 's' : ''} added · ${failed} skipped (invalid or unclear date)`
+    : `✓ ${added} date${added !== 1 ? 's' : ''} added to calendar`;
+  notif.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:var(--green);color:white;padding:0.75rem 1.25rem;border-radius:6px;font-size:0.85rem;font-weight:600;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.2);max-width:400px';
+  notif.textContent = msg;
   notif.textContent = `✓ ${added} date${added !== 1 ? 's' : ''} added to calendar`;
   document.body.appendChild(notif);
   setTimeout(() => notif.remove(), 4000);

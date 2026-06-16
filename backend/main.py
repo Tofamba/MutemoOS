@@ -476,6 +476,8 @@ async def upload_document(
             text, page_count, ocr_used = extract_pdf_text(content)
         elif ext in ("docx", "doc"):
             text = extract_docx_text(content)
+        elif ext in ("xlsx", "xlsm"):
+            text = extract_xlsx_text(content)
         elif ext in ("txt", "eml", "msg"):
             text = content.decode("utf-8", errors="replace")
         else:
@@ -744,13 +746,70 @@ def ocr_pdf_pages(content: bytes, page_indices: list) -> dict:
 
     return results
 
+def extract_xlsx_text(content: bytes):
+    """
+    Extract readable text from an Excel spreadsheet for indexing and search.
+    Converts each sheet's data into a plain-text table representation,
+    preserving row/column relationships so the content remains meaningful
+    when chunked and embedded for semantic search.
+    """
+    try:
+        import openpyxl, io
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+        lines = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            lines.append(f"=== Sheet: {sheet_name} ===")
+            for row in ws.iter_rows(values_only=True):
+                # Skip fully empty rows
+                if all(cell is None for cell in row):
+                    continue
+                row_text = " | ".join(
+                    str(cell) if cell is not None else "" for cell in row
+                ).strip(" |")
+                if row_text:
+                    lines.append(row_text)
+        wb.close()
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[extract_xlsx_text] failed: {e}")
+        return ""
+
 def extract_docx_text(content: bytes):
+    """
+    Extract text from a Word document. Handles both modern .docx (XML/zip
+    format, via python-docx) and legacy .doc (binary OLE format, via antiword).
+    Legacy .doc files start with the OLE compound file signature (D0 CF 11 E0),
+    while .docx files are zip archives (start with PK).
+    """
+    # Detect legacy binary .doc format by file signature
+    if content[:4] == b'\xd0\xcf\x11\xe0':
+        try:
+            import subprocess, tempfile
+            with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            try:
+                result = subprocess.run(
+                    ["antiword", tmp_path],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+        except Exception as e:
+            print(f"[extract_docx_text] antiword failed: {e}")
+        return ""  # legacy .doc that couldn't be read — don't return binary garbage
+
+    # Modern .docx (zip-based)
     try:
         import docx, io
         doc = docx.Document(io.BytesIO(content))
         return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
     except Exception:
-        return content.decode("utf-8", errors="replace")
+        return ""  # don't fall back to raw decode — that produces binary garbage
 
 def chunk_text(text: str, page_count: int, doc_id: str, matter_id: str) -> list:
     CHUNK_WORDS = 500
