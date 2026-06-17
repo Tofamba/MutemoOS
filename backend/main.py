@@ -4,7 +4,7 @@ FastAPI backend v1.0
 Mutemo = Law/Rule in Shona
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -61,6 +61,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Mutemo Desk", version="1.1.0", lifespan=lifespan)
 
+# ── AlertEngine instrumentation (free SDK — P95 latency, error rate, health score) ──
+try:
+    from fastapi_alertengine import instrument
+    instrument(app)
+    print("[startup] AlertEngine instrumentation active — see /health/alerts")
+except Exception as e:
+    print(f"[startup] AlertEngine instrumentation unavailable: {e}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -82,42 +90,155 @@ async def size_limit_middleware(request, call_next):
             )
     return await call_next(request)
 
-# ── Basic Auth (optional — enabled if MUTEMO_PASSWORD is set in .env) ───────────
-import base64
+# ── OTP Authentication (Twilio SMS) ─────────────────────────────────────────────
+import secrets
+import time
 import hmac
 
-MUTEMO_USERNAME = os.environ.get("MUTEMO_USERNAME", "mutemo")
-MUTEMO_PASSWORD = os.environ.get("MUTEMO_PASSWORD")  # if unset, auth is disabled
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER")
+
+# Comma-separated list of allowed phone numbers in E.164 format, e.g. "+263771234567,+263772345678"
+ALLOWED_PHONE_NUMBERS = set(
+    n.strip() for n in os.environ.get("MUTEMO_ALLOWED_PHONES", "").split(",") if n.strip()
+)
+
+AUTH_ENABLED = bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER and ALLOWED_PHONE_NUMBERS)
+
+# In-memory OTP store: {phone_number: {"code": "123456", "expires": timestamp, "attempts": 0}}
+_otp_store: dict = {}
+# In-memory valid sessions: {session_token: {"phone": "+263...", "expires": timestamp}}
+_sessions: dict = {}
+
+OTP_TTL_SECONDS = 300       # 5 minutes to enter the code
+SESSION_TTL_SECONDS = 86400 * 7  # 7 day session — re-verify weekly
+MAX_OTP_ATTEMPTS = 5
+
+def _send_sms_otp(phone: str, code: str) -> bool:
+    """Send an OTP code via Twilio SMS. Returns True on success."""
+    try:
+        from twilio.rest import Client
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        client.messages.create(
+            body=f"Your Mutemo Desk login code is {code}. It expires in 5 minutes.",
+            from_=TWILIO_FROM_NUMBER,
+            to=phone,
+        )
+        return True
+    except Exception as e:
+        print(f"[otp] Twilio send failed: {e}")
+        return False
+
+def _cleanup_expired():
+    """Remove expired OTPs and sessions to keep memory bounded."""
+    now = time.time()
+    for phone in list(_otp_store.keys()):
+        if _otp_store[phone]["expires"] < now:
+            del _otp_store[phone]
+    for token in list(_sessions.keys()):
+        if _sessions[token]["expires"] < now:
+            del _sessions[token]
+
+class OTPRequestBody(BaseModel):
+    phone: str  # E.164 format, e.g. "+263771234567"
+
+class OTPVerifyBody(BaseModel):
+    phone: str
+    code: str
+
+@app.post("/api/auth/request-otp")
+async def request_otp(req: OTPRequestBody):
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=503, detail="OTP login is not configured on this server.")
+    _cleanup_expired()
+    phone = req.phone.strip()
+    if phone not in ALLOWED_PHONE_NUMBERS:
+        # Don't reveal whether the number is valid — generic message either way
+        return {"sent": True, "message": "If this number is registered, a code has been sent."}
+
+    code = f"{secrets.randbelow(1000000):06d}"
+    _otp_store[phone] = {"code": code, "expires": time.time() + OTP_TTL_SECONDS, "attempts": 0}
+
+    sent = await asyncio.to_thread(_send_sms_otp, phone, code)
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send SMS. Please try again.")
+    return {"sent": True, "message": "If this number is registered, a code has been sent."}
+
+@app.post("/api/auth/verify-otp")
+async def verify_otp(req: OTPVerifyBody, response: Response):
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=503, detail="OTP login is not configured on this server.")
+    _cleanup_expired()
+    phone = req.phone.strip()
+    entry = _otp_store.get(phone)
+
+    if not entry:
+        raise HTTPException(status_code=401, detail="No active code for this number. Request a new one.")
+
+    entry["attempts"] += 1
+    if entry["attempts"] > MAX_OTP_ATTEMPTS:
+        del _otp_store[phone]
+        raise HTTPException(status_code=429, detail="Too many attempts. Request a new code.")
+
+    if not hmac.compare_digest(entry["code"], req.code.strip()):
+        raise HTTPException(status_code=401, detail="Incorrect code.")
+
+    # Success — issue a session token
+    del _otp_store[phone]
+    token = secrets.token_urlsafe(32)
+    _sessions[token] = {"phone": phone, "expires": time.time() + SESSION_TTL_SECONDS}
+
+    response.set_cookie(
+        key="mutemo_session",
+        value=token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return {"verified": True, "phone": phone}
+
+@app.post("/api/auth/logout")
+async def logout(request: Request, response: Response):
+    token = request.cookies.get("mutemo_session")
+    if token and token in _sessions:
+        del _sessions[token]
+    response.delete_cookie("mutemo_session")
+    return {"logged_out": True}
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    """Check if the current session is valid, and whether OTP auth is enabled at all."""
+    if not AUTH_ENABLED:
+        return {"auth_enabled": False, "authenticated": True}  # auth disabled = open access
+    token = request.cookies.get("mutemo_session")
+    _cleanup_expired()
+    if token and token in _sessions:
+        return {"auth_enabled": True, "authenticated": True, "phone": _sessions[token]["phone"]}
+    return {"auth_enabled": True, "authenticated": False}
 
 @app.middleware("http")
-async def basic_auth_middleware(request, call_next):
-    if not MUTEMO_PASSWORD:
-        return await call_next(request)  # auth disabled — no password configured
+async def session_auth_middleware(request, call_next):
+    if not AUTH_ENABLED:
+        return await call_next(request)  # OTP auth not configured — open access
 
-    # Allow health check and internal API calls without auth
-    if request.url.path in ("/api/health", "/api/extract-dates",
-                             "/api/search", "/api/calendar",
-                             "/api/matters", "/api/generate-affidavit",
-                             "/api/generate-document"):
+    # Always allow auth endpoints and health check through
+    open_paths = ("/api/health", "/api/auth/request-otp", "/api/auth/verify-otp", "/api/auth/status")
+    if request.url.path in open_paths:
         return await call_next(request)
 
-    auth_header = request.headers.get("authorization")
-    if auth_header and auth_header.startswith("Basic "):
-        try:
-            decoded = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
-            username, _, password = decoded.partition(":")
-            user_ok = hmac.compare_digest(username, MUTEMO_USERNAME)
-            pass_ok = hmac.compare_digest(password, MUTEMO_PASSWORD)
-            if user_ok and pass_ok:
-                return await call_next(request)
-        except Exception:
-            pass
+    # Allow the frontend itself (HTML/JS/CSS) to load — the JS handles showing the login screen
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
 
-    return JSONResponse(
-        status_code=401,
-        content={"detail": "Authentication required"},
-        headers={"WWW-Authenticate": 'Basic realm="Mutemo Desk"'},
-    )
+    _cleanup_expired()
+    token = request.cookies.get("mutemo_session")
+    if token and token in _sessions and _sessions[token]["expires"] > time.time():
+        return await call_next(request)
+
+    return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+
 
 frontend_path = os.path.join(os.path.dirname(__file__), "../frontend")
 assets_path = os.path.join(frontend_path, "assets")
@@ -2185,11 +2306,24 @@ You have deep expertise in:
 
 Always produce complete, properly formatted documents ready for use.
 Use formal legal English as practised in Zimbabwe courts.
-Leave [_____] for information not provided."""
+Leave [_____] for information not provided.
+Do not include a court caption, "Plaintiff/Defendant" framing, case number, or
+litigation-style heading unless the document type genuinely requires one
+(e.g. summons, court applications, notices of appeal). Match the document's
+actual real-world format — a lease looks like a lease, a letter looks like a
+letter, a trust deed looks like a notarial deed."""
+
+# Document types that are genuinely litigation/court documents and benefit
+# from a court caption, Plaintiff/Defendant framing, and case number.
+LITIGATION_DOC_TYPES = {
+    "summons_matrimonial", "summons_civil", "court_application",
+    "urgent_chamber", "notice_of_appeal", "review", "heads_of_argument",
+}
 
 @app.post("/api/generate-document")
 async def generate_document(req: DocumentRequest):
     doc_system_addition = DOC_TYPE_PROMPTS.get(req.doc_type, DOC_TYPE_PROMPTS["freeform"])
+    is_litigation = req.doc_type in LITIGATION_DOC_TYPES
 
     precedent_block = ""
     if req.precedent_context:
@@ -2198,14 +2332,31 @@ async def generate_document(req: DocumentRequest):
         text = str(req.precedent_context.get("text", ""))[:2000]
         precedent_block = f"\n\nFIRM PRECEDENT — adopt this drafting style ({fname}, {mname}):\n---\n{text}\n---"
 
-    prompt = f"""Draft a complete {req.doc_type.replace('_', ' ').title()} for Zimbabwe courts.
+    doc_title = req.doc_type.replace('_', ' ').title()
 
-PARTIES:
+    if is_litigation:
+        # Court documents: Plaintiff/Defendant, court, case number all relevant
+        party_block = f"""PARTIES:
 - Plaintiff/Applicant: {req.plaintiff or '[TO BE COMPLETED]'}
 - Defendant/Respondent: {req.defendant or '[TO BE COMPLETED]'}
 
 COURT: {req.court or 'High Court of Zimbabwe'}
-CASE NUMBER: {req.case_number or '[TO BE ALLOCATED]'}
+CASE NUMBER: {req.case_number or '[TO BE ALLOCATED]'}"""
+        opening = f"Draft a complete {doc_title} for Zimbabwe courts."
+    else:
+        # Non-litigation documents: parties are just "parties", no court caption
+        party_label_a = req.plaintiff or '[PARTY A — TO BE COMPLETED]'
+        party_label_b = req.defendant or '[PARTY B — TO BE COMPLETED]'
+        party_block = f"""PARTIES INVOLVED:
+- First party: {party_label_a}
+- Second party: {party_label_b}"""
+        if req.case_number:
+            party_block += f"\nReference/Matter number: {req.case_number}"
+        opening = f"Draft a complete {doc_title}. This is NOT a court pleading — do not include a court caption, case number heading, or Plaintiff/Defendant litigation framing. Format it as this type of document actually appears in real legal practice."
+
+    prompt = f"""{opening}
+
+{party_block}
 
 FACTS AND BACKGROUND:
 {req.facts}
