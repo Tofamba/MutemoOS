@@ -1511,9 +1511,7 @@ async function renderMatterPanel(id) {
         ${matter.custom_status ? `<span class="chip chip-gray">${escHtml(matter.custom_status)}</span>` : ''}
       </div>
 
-      <!-- Progress Notes -->
-      <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
-        <div style="font-weight:600;font-size:0.78rem;color:var(--ink2);margin-bottom:0.5rem">📝 Progress Notes</div>
+
       <!-- Progress Notes -->
       <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
         <div style="font-weight:600;font-size:0.78rem;color:var(--ink2);margin-bottom:0.5rem">📝 Progress Notes</div>
@@ -1537,19 +1535,7 @@ async function renderMatterPanel(id) {
             </div>`).join('') : '<p style="color:var(--ink3);font-size:0.78rem">No notes yet.</p>'}
         </div>
       </div>
-        <div id="note-date-prompt-${id}" style="display:none"></div>
-        <div id="notes-list-${id}">
-          ${notes.length ? notes.map(n => `
-            <div style="padding:0.4rem 0;border-bottom:1px solid var(--paper3);display:flex;gap:8px;align-items:flex-start">
-              <div style="flex:1">
-                <div style="font-size:0.8rem">${escHtml(n.text)}</div>
-                <div style="font-size:0.68rem;color:var(--ink3);margin-top:2px">${n.author} · ${n.created_at?.slice(0,10)}</div>
-              </div>
-              <button onclick="deleteNote('${id}','${n.id}')"
-                style="background:none;border:none;color:var(--ink3);cursor:pointer;font-size:0.75rem;padding:2px 4px">✕</button>
-            </div>`).join('') : '<p style="color:var(--ink3);font-size:0.78rem">No notes yet.</p>'}
-        </div>
-      </div>
+
 
       <!-- Documents -->
       <div style="padding:0.75rem 0">
