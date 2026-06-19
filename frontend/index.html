@@ -1636,12 +1636,15 @@ async function addNote(matterId, noteText) {
     }
 
     // Check for detected dates
-    if (data.detected_dates && data.detected_dates.length > 0) {
-      showNoteDatePrompt(matterId, data.detected_dates);
-    }
+    const detectedDates = data.detected_dates || [];
 
     // Re-render the panel to show new note
     await renderMatterPanel(matterId);
+
+    // Show date prompt AFTER re-render so the container exists in the DOM
+    if (detectedDates.length > 0) {
+      showNoteDatePrompt(matterId, detectedDates);
+    }
 
   } catch(e) {
     alert('Failed to add note. Please try again.');
