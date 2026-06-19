@@ -381,10 +381,30 @@ load_state()
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
+MATTER_STATUSES = ["Active", "Awaiting Client", "Awaiting Court", "On Hold", "Closed"]
+
 class MatterCreate(BaseModel):
     name: str
-    number: Optional[str] = None
+    number: Optional[str] = None        # legacy field kept for compatibility
+    internal_ref: Optional[str] = None  # NGM 1, NGM 9A, etc.
+    external_ref: Optional[str] = None  # HC number, DR number, case number, etc.
     matter_type: Optional[str] = None
+    status: Optional[str] = "Active"
+    client_name: Optional[str] = None
+    custom_status: Optional[str] = None # for statuses not in the standard list
+
+class MatterUpdate(BaseModel):
+    name: Optional[str] = None
+    internal_ref: Optional[str] = None
+    external_ref: Optional[str] = None
+    matter_type: Optional[str] = None
+    status: Optional[str] = None
+    client_name: Optional[str] = None
+    custom_status: Optional[str] = None
+
+class ProgressNote(BaseModel):
+    text: str
+    author: Optional[str] = "NGM"
 
 class AffidavitRequest(BaseModel):
     matter_type: Optional[str] = None
@@ -540,17 +560,116 @@ async def list_matters():
 @app.post("/api/matters")
 async def create_matter(matter: MatterCreate):
     mid = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
     obj = {
         "id": mid,
         "name": matter.name,
-        "number": matter.number,
+        "number": matter.number,            # legacy
+        "internal_ref": matter.internal_ref or matter.number or "",
+        "external_ref": matter.external_ref or "",
         "matter_type": matter.matter_type,
-        "created_at": datetime.utcnow().isoformat(),
+        "status": matter.status or "Active",
+        "client_name": matter.client_name or "",
+        "custom_status": matter.custom_status or "",
+        "created_at": now,
+        "last_activity": now,
         "document_count": 0,
+        "progress_notes": [],
     }
     matters_db[mid] = obj
     save_state()
     return obj
+
+@app.patch("/api/matters/{matter_id}")
+async def update_matter(matter_id: str, update: MatterUpdate):
+    if matter_id not in matters_db:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    m = matters_db[matter_id]
+    for field, value in update.dict(exclude_none=True).items():
+        m[field] = value
+    m["last_activity"] = datetime.utcnow().isoformat()
+    save_state()
+    return m
+
+@app.post("/api/matters/{matter_id}/notes")
+async def add_progress_note(matter_id: str, note: ProgressNote):
+    if matter_id not in matters_db:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    m = matters_db[matter_id]
+    if "progress_notes" not in m:
+        m["progress_notes"] = []
+    entry = {
+        "id": str(uuid.uuid4()),
+        "text": note.text,
+        "author": note.author or "NGM",
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    m["progress_notes"].insert(0, entry)  # newest first
+    m["last_activity"] = entry["created_at"]
+    save_state()
+
+    # Quietly scan the note text for actionable dates
+    detected_dates = []
+    try:
+        today = datetime.utcnow().date().isoformat()
+        matter_name = m.get("name", "")
+        internal_ref = m.get("internal_ref", "")
+
+        def scan_note_sync():
+            msg = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=400,
+                messages=[{"role": "user", "content": f"""Scan this legal progress note for any specific dates, deadlines, or appointments mentioned.
+Today is {today}.
+
+Return ONLY valid JSON — no other text:
+{{
+  "dates": [
+    {{
+      "title": "brief description of the action",
+      "date": "YYYY-MM-DD",
+      "time": "HH:MM or null",
+      "event_type": "deadline|hearing|meeting|filing|other"
+    }}
+  ]
+}}
+
+If no specific dates are mentioned, return {{"dates": []}}.
+Only include dates with a specific day — ignore vague references like "next week" or "soon".
+
+Note text: {note.text}
+
+JSON:"""}]
+            )
+            raw = msg.content[0].text.strip()
+            raw = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+            parsed = json.loads(raw)
+            return parsed.get("dates", [])
+
+        detected_dates = await asyncio.to_thread(scan_note_sync)
+
+        # Enrich each detected date with matter context
+        for d in detected_dates:
+            d["matter_id"] = matter_id
+            d["matter_name"] = matter_name
+            d["internal_ref"] = internal_ref
+            d["source"] = "progress_note"
+
+    except Exception as e:
+        print(f"[notes] date scan failed: {e}")
+        detected_dates = []
+
+    return {**entry, "detected_dates": detected_dates}
+
+@app.delete("/api/matters/{matter_id}/notes/{note_id}")
+async def delete_progress_note(matter_id: str, note_id: str):
+    if matter_id not in matters_db:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    m = matters_db[matter_id]
+    notes = m.get("progress_notes", [])
+    m["progress_notes"] = [n for n in notes if n["id"] != note_id]
+    save_state()
+    return {"deleted": True}
 
 @app.delete("/api/matters/{matter_id}")
 async def delete_matter(matter_id: str):
@@ -632,6 +751,7 @@ async def upload_document(
     }
     documents_db[doc_id] = doc
     matters_db[matter_id]["document_count"] = matters_db[matter_id].get("document_count", 0) + 1
+    matters_db[matter_id]["last_activity"] = datetime.utcnow().isoformat()
 
     if text:
         new_chunks = chunk_text(text, page_count, doc_id, matter_id)
@@ -2875,6 +2995,128 @@ def send_reminder_email(recipient: str, events: list, test: bool = False):
         server.login(smtp_user, smtp_password)
         server.sendmail(from_addr, [recipient], msg.as_string())
 
+def get_stale_matters(threshold_days: int = 14) -> list:
+    """
+    Return matters that have had no activity for threshold_days days,
+    are not Closed, and have no calendar event set beyond threshold_days from now.
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=threshold_days)
+    future_cutoff = now + timedelta(days=threshold_days)
+
+    # Build a set of matter IDs that have upcoming calendar events
+    matters_with_upcoming = set()
+    for event in calendar_db:
+        try:
+            event_date = datetime.fromisoformat(event["date"])
+            if event_date > future_cutoff and event.get("matter_id"):
+                matters_with_upcoming.add(event["matter_id"])
+            elif event_date > future_cutoff and event.get("matter_name"):
+                # fallback: match by name if matter_id not set
+                for mid, m in matters_db.items():
+                    if m.get("name") == event.get("matter_name"):
+                        matters_with_upcoming.add(mid)
+        except Exception:
+            continue
+
+    stale = []
+    for mid, m in matters_db.items():
+        status = m.get("status", "Active")
+        if status in ("Closed", "N/A"):
+            continue
+        if mid in matters_with_upcoming:
+            continue
+        last_activity = m.get("last_activity") or m.get("created_at")
+        if not last_activity:
+            continue
+        try:
+            last_dt = datetime.fromisoformat(last_activity)
+            if last_dt < cutoff:
+                stale.append({
+                    "id": mid,
+                    "name": m.get("name", "Unnamed"),
+                    "internal_ref": m.get("internal_ref", m.get("number", "")),
+                    "client_name": m.get("client_name", ""),
+                    "status": status,
+                    "last_activity": last_activity,
+                    "days_since": (now - last_dt).days,
+                })
+        except Exception:
+            continue
+
+    stale.sort(key=lambda x: x["days_since"], reverse=True)
+    return stale
+
+def send_inactivity_alert_email(recipient: str, stale_matters: list):
+    """Send a digest email listing matters with no activity for 14+ days."""
+    smtp_host = os.environ["SMTP_HOST"]
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ["SMTP_USER"]
+    smtp_password = os.environ["SMTP_PASSWORD"]
+    from_addr = os.environ.get("SMTP_FROM", smtp_user)
+
+    rows = ""
+    for m in stale_matters:
+        ref = m.get("internal_ref") or ""
+        client = m.get("client_name") or ""
+        days = m.get("days_since", "?")
+        status = m.get("status", "")
+        last = m.get("last_activity", "")[:10] if m.get("last_activity") else "Unknown"
+        rows += f"""
+        <tr>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee;font-weight:600">{ref}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee">{m['name']}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee">{client}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee">{status}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee">{last}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #eee;color:#c0392b;font-weight:600">{days} days</td>
+        </tr>"""
+
+    html_body = f"""
+    <div style="font-family:Georgia,serif;max-width:700px;margin:0 auto">
+      <div style="background:#2c3e50;color:white;padding:16px 20px;border-radius:6px 6px 0 0">
+        <div style="font-size:18px;font-weight:700">⚖ Mutemo Desk — Matter Inactivity Alert</div>
+        <div style="font-size:12px;opacity:0.7;margin-top:4px">Sawyer &amp; Mkushi Legal Practitioners</div>
+      </div>
+      <div style="padding:20px;background:#fafafa;border:1px solid #e5e5e5;border-top:none">
+        <p style="margin:0 0 16px">The following <strong>{len(stale_matters)} matter{'s' if len(stale_matters)!=1 else ''}</strong>
+        have had no recorded activity for <strong>14 or more days</strong> and have no upcoming calendar date set.
+        Please review and update progress notes or set a next action date.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#f0f0f0">
+              <th style="padding:8px 10px;text-align:left">Ref</th>
+              <th style="padding:8px 10px;text-align:left">Matter</th>
+              <th style="padding:8px 10px;text-align:left">Client</th>
+              <th style="padding:8px 10px;text-align:left">Status</th>
+              <th style="padding:8px 10px;text-align:left">Last Activity</th>
+              <th style="padding:8px 10px;text-align:left">Dormant</th>
+            </tr>
+          </thead>
+          <tbody>{rows}</tbody>
+        </table>
+        <p style="margin:16px 0 0;font-size:12px;color:#888">
+          Log into Mutemo Desk to add progress notes or update matter status.
+        </p>
+      </div>
+    </div>"""
+
+    text_body = f"Matter Inactivity Alert — {len(stale_matters)} matters with no activity for 14+ days:\n\n"
+    for m in stale_matters:
+        text_body += f"• {m.get('internal_ref','')} — {m['name']} ({m.get('days_since','?')} days)\n"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"⚖ Mutemo Desk — {len(stale_matters)} matter{'s' if len(stale_matters)!=1 else ''} need attention"
+    msg["From"] = from_addr
+    msg["To"] = recipient
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(from_addr, [recipient], msg.as_string())
+
 async def reminder_scheduler_loop():
     """Background loop — checks every 30 minutes whether it's time to send the daily reminder."""
     while True:
@@ -2886,14 +3128,22 @@ async def reminder_scheduler_loop():
                 already_sent = reminder_settings.get("last_run_date") == today_str
                 if now.hour == target_hour and not already_sent:
                     upcoming = get_upcoming_for_reminders()
-                    # Mark as attempted BEFORE sending — if it fails, we retry
-                    # tomorrow rather than every 30 min for the rest of this hour.
                     reminder_settings["last_run_date"] = today_str
                     save_state()
                     try:
                         send_reminder_email(reminder_settings["recipient_email"], upcoming)
                     except Exception as e:
                         print(f"[reminder] failed to send: {e}")
+
+                    # Also send inactivity alert if any matters are stale
+                    try:
+                        stale = get_stale_matters(threshold_days=14)
+                        if stale:
+                            send_inactivity_alert_email(reminder_settings["recipient_email"], stale)
+                            print(f"[inactivity] sent alert for {len(stale)} stale matters")
+                    except Exception as e:
+                        print(f"[inactivity] failed to send alert: {e}")
+
         except Exception as e:
             print(f"[reminder] scheduler error: {e}")
         await asyncio.sleep(30 * 60)  # check every 30 minutes

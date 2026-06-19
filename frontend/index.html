@@ -221,7 +221,38 @@ select{cursor:pointer}
 </style>
 </head>
 <body>
-<div class="app">
+
+<!-- ═══════════════ LOGIN OVERLAY ═══════════════ -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:var(--paper);z-index:2000;align-items:center;justify-content:center">
+  <div style="background:white;max-width:380px;width:90%;border-radius:10px;padding:2rem;box-shadow:0 10px 40px rgba(0,0,0,0.15);text-align:center">
+    <div style="font-size:2.2rem;margin-bottom:0.5rem">⚖</div>
+    <div style="font-weight:700;font-size:1.1rem;color:var(--ink);margin-bottom:0.2rem">Mutemo Desk</div>
+    <div style="font-size:0.72rem;color:var(--ink3);letter-spacing:0.05em;margin-bottom:1.5rem">ZIMBABWE LEGAL PRACTICE SYSTEM</div>
+
+    <div id="login-status" class="status" style="text-align:left"></div>
+
+    <!-- Step 1: phone entry -->
+    <div id="login-step-phone">
+      <p style="font-size:0.8rem;color:var(--ink2);margin-bottom:1rem;text-align:left">Enter your registered phone number to receive a one-time login code via SMS.</p>
+      <input type="tel" id="login-phone" placeholder="+263771234567"
+             style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:6px;font-size:0.9rem;margin-bottom:0.75rem;text-align:center"
+             onkeydown="if(event.key==='Enter')requestLoginOtp()"/>
+      <button class="btn btn-primary" style="width:100%" onclick="requestLoginOtp()" id="login-request-btn">Send Code</button>
+    </div>
+
+    <!-- Step 2: code entry -->
+    <div id="login-step-code" style="display:none">
+      <p style="font-size:0.8rem;color:var(--ink2);margin-bottom:1rem;text-align:left">Enter the 6-digit code sent to <strong id="login-phone-display"></strong></p>
+      <input type="text" id="login-code" placeholder="123456" maxlength="6" inputmode="numeric"
+             style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:6px;font-size:1.3rem;letter-spacing:0.3em;text-align:center;margin-bottom:0.75rem"
+             onkeydown="if(event.key==='Enter')verifyLoginOtp()"/>
+      <button class="btn btn-primary" style="width:100%;margin-bottom:0.5rem" onclick="verifyLoginOtp()" id="login-verify-btn">Verify &amp; Log In</button>
+      <button class="btn btn-outline" style="width:100%" onclick="backToPhoneEntry()">← Use a different number</button>
+    </div>
+  </div>
+</div>
+
+<div class="app" id="main-app" style="display:none">
 
 <!-- Header -->
 <header class="header">
@@ -232,7 +263,10 @@ select{cursor:pointer}
       <div class="header-subtitle">ZIMBABWE LEGAL PRACTICE SYSTEM</div>
     </div>
   </div>
-  <div class="header-firm">Sawyer &amp; Mkushi Legal Practitioners</div>
+  <div class="header-firm" style="display:flex;align-items:center;gap:12px">
+    <span>Sawyer &amp; Mkushi Legal Practitioners</span>
+    <button onclick="logout()" style="background:rgba(255,255,255,0.15);border:none;color:white;padding:4px 10px;border-radius:4px;font-size:0.7rem;cursor:pointer">Log out</button>
+  </div>
 </header>
 
 <!-- Nav -->
@@ -272,33 +306,58 @@ select{cursor:pointer}
           </div>
           <div style="text-align:center;font-size:0.75rem;color:var(--ink3);margin:0.5rem 0">or create new</div>
           <div class="form-group">
-            <label>New Matter Name</label>
+            <label>Matter Name / Description</label>
             <input type="text" id="new-matter-name" placeholder="e.g. Moyo v Dube — Stand 245 Borrowdale"/>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Case Number</label>
-              <input type="text" id="new-matter-number" placeholder="HC 1234/25"/>
+              <label>Internal Ref</label>
+              <input type="text" id="new-matter-internal-ref" placeholder="e.g. NGM 1"/>
             </div>
             <div class="form-group">
-              <label>Matter Type</label>
-              <select id="new-matter-type">
-                <option value="">— Select —</option>
-                <option value="eviction">Eviction</option>
-                <option value="estate">Estate Administration</option>
-                <option value="employment">Employment</option>
-                <option value="commercial_property">Commercial Property</option>
-                <option value="commercial_contract">Commercial Contract</option>
-                <option value="customary_law">Customary Law</option>
-                <option value="matrimonial">Matrimonial</option>
-                <option value="company_law">Company Law</option>
-                <option value="criminal">Criminal</option>
-                <option value="constitutional">Constitutional</option>
-                <option value="other">Other</option>
+              <label>External Ref</label>
+              <input type="text" id="new-matter-external-ref" placeholder="HC 1234/26 or DR number"/>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Client Name</label>
+              <input type="text" id="new-matter-client" placeholder="e.g. John Moyo"/>
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <select id="new-matter-status">
+                <option value="Active">Active</option>
+                <option value="Awaiting Client">Awaiting Client</option>
+                <option value="Awaiting Court">Awaiting Court</option>
+                <option value="On Hold">On Hold</option>
+                <option value="Closed">Closed</option>
               </select>
             </div>
           </div>
-          <button class="btn btn-outline btn-sm" onclick="createMatterFromVault()" style="width:100%">Create Matter</button>
+          <div class="form-group">
+            <label>Matter Type</label>
+            <select id="new-matter-type">
+              <option value="">— Select —</option>
+              <option value="eviction">Eviction</option>
+              <option value="estate">Estate Administration</option>
+              <option value="trust">Trust</option>
+              <option value="employment">Employment / Labour</option>
+              <option value="commercial_property">Commercial Property</option>
+              <option value="commercial_contract">Commercial Contract</option>
+              <option value="conveyancing">Conveyancing</option>
+              <option value="customary_law">Customary Law</option>
+              <option value="matrimonial">Matrimonial / Divorce</option>
+              <option value="family_law">Family Law</option>
+              <option value="company_law">Company Law</option>
+              <option value="criminal">Criminal</option>
+              <option value="constitutional">Constitutional</option>
+              <option value="debt_collection">Debt Collection</option>
+              <option value="mining">Mining</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="createMatterFromVault()" style="width:100%">+ Create Matter</button>
         </div>
       </div>
     </div>
@@ -804,13 +863,13 @@ select{cursor:pointer}
       </div>
 
       <!-- Common fields -->
-      <div class="form-section">
-        <div class="form-section-label">Parties</div>
+      <div class="form-section" id="draft-parties-section">
+        <div class="form-section-label" id="draft-parties-label">Parties</div>
         <div class="form-row">
-          <div class="form-group"><label>Plaintiff / Applicant</label><input type="text" id="draft-plaintiff" placeholder="e.g. MARY CHIGUMBA"/></div>
-          <div class="form-group"><label>Defendant / Respondent</label><input type="text" id="draft-defendant" placeholder="e.g. JOHN CHIGUMBA"/></div>
+          <div class="form-group"><label id="draft-party-a-label">Plaintiff / Applicant</label><input type="text" id="draft-plaintiff" placeholder="e.g. MARY CHIGUMBA"/></div>
+          <div class="form-group"><label id="draft-party-b-label">Defendant / Respondent</label><input type="text" id="draft-defendant" placeholder="e.g. JOHN CHIGUMBA"/></div>
         </div>
-        <div class="form-row">
+        <div class="form-row" id="draft-court-row">
           <div class="form-group">
             <label>Court</label>
             <select id="draft-court">
@@ -1152,6 +1211,107 @@ async function init() {
   showTab('search');
 }
 
+// ── Authentication ───────────────────────────────────────────────────────────
+let loginPhone = '';
+
+async function checkAuthAndBoot() {
+  try {
+    const res = await fetch(`${API}/api/auth/status`);
+    const data = await res.json();
+    if (!data.auth_enabled || data.authenticated) {
+      document.getElementById('login-overlay').style.display = 'none';
+      document.getElementById('main-app').style.display = 'block';
+      init();
+    } else {
+      document.getElementById('login-overlay').style.display = 'flex';
+      document.getElementById('main-app').style.display = 'none';
+    }
+  } catch(e) {
+    // If the status check itself fails, default to showing the app
+    // (covers the auth-disabled / no-Twilio-configured case)
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('main-app').style.display = 'block';
+    init();
+  }
+}
+
+async function requestLoginOtp() {
+  const phone = document.getElementById('login-phone').value.trim();
+  if (!phone) { showLoginStatus('Please enter a phone number.', 'error'); return; }
+
+  const btn = document.getElementById('login-request-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Sending…';
+  showLoginStatus('', '');
+
+  try {
+    const res = await fetch(`${API}/api/auth/request-otp`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ phone })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Failed to send code'); }
+
+    loginPhone = phone;
+    document.getElementById('login-phone-display').textContent = phone;
+    document.getElementById('login-step-phone').style.display = 'none';
+    document.getElementById('login-step-code').style.display = 'block';
+    document.getElementById('login-code').focus();
+    showLoginStatus('Code sent. Check your phone.', 'success');
+  } catch(e) {
+    showLoginStatus(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Send Code';
+  }
+}
+
+async function verifyLoginOtp() {
+  const code = document.getElementById('login-code').value.trim();
+  if (!code || code.length !== 6) { showLoginStatus('Enter the 6-digit code.', 'error'); return; }
+
+  const btn = document.getElementById('login-verify-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Verifying…';
+
+  try {
+    const res = await fetch(`${API}/api/auth/verify-otp`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ phone: loginPhone, code })
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Incorrect code'); }
+
+    showLoginStatus('✓ Logged in.', 'success');
+    setTimeout(checkAuthAndBoot, 400);
+  } catch(e) {
+    showLoginStatus(e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = 'Verify & Log In';
+  }
+}
+
+function backToPhoneEntry() {
+  document.getElementById('login-step-code').style.display = 'none';
+  document.getElementById('login-step-phone').style.display = 'block';
+  document.getElementById('login-code').value = '';
+  showLoginStatus('', '');
+}
+
+function showLoginStatus(msg, type) {
+  const el = document.getElementById('login-status');
+  if (!msg) { el.className = 'status'; el.innerHTML = ''; return; }
+  el.innerHTML = msg;
+  el.className = `status show ${type}`;
+}
+
+async function logout() {
+  await fetch(`${API}/api/auth/logout`, {method: 'POST'});
+  location.reload();
+}
+
+
+
 async function loadMatters() {
   try {
     const res = await fetch(`${API}/api/matters`);
@@ -1203,7 +1363,10 @@ async function createMatterFromVault() {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         name,
-        number: document.getElementById('new-matter-number').value.trim() || null,
+        internal_ref: document.getElementById('new-matter-internal-ref').value.trim() || null,
+        external_ref: document.getElementById('new-matter-external-ref').value.trim() || null,
+        client_name: document.getElementById('new-matter-client').value.trim() || null,
+        status: document.getElementById('new-matter-status').value || 'Active',
         matter_type: document.getElementById('new-matter-type').value || null,
       })
     });
@@ -1212,8 +1375,13 @@ async function createMatterFromVault() {
     populateMatterSelects();
     document.getElementById('upload-matter-select').value = m.id;
     selectedMatterId = m.id;
-    document.getElementById('new-matter-name').value = '';
-    document.getElementById('new-matter-number').value = '';
+    // Clear form
+    ['new-matter-name','new-matter-internal-ref','new-matter-external-ref','new-matter-client'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    document.getElementById('new-matter-status').value = 'Active';
+    document.getElementById('new-matter-type').value = '';
     showVaultStatus(`Matter "${m.name}" created.`, 'success');
   } catch(e) { showVaultStatus('Could not create matter.', 'error'); }
 }
@@ -1222,6 +1390,14 @@ function onUploadMatterChange() {
   selectedMatterId = document.getElementById('upload-matter-select').value || null;
 }
 
+const STATUS_COLORS = {
+  'Active': 'chip-green',
+  'Awaiting Client': 'chip-gold',
+  'Awaiting Court': 'chip-blue',
+  'On Hold': 'chip-gray',
+  'Closed': 'chip-red',
+};
+
 function renderMattersList() {
   const el = document.getElementById('matters-list');
   if (!el) return;
@@ -1229,16 +1405,26 @@ function renderMattersList() {
     el.innerHTML = '<div class="empty-state"><div class="icon">📂</div><p>No matters yet. Upload documents to create your first matter.</p></div>';
     return;
   }
-  el.innerHTML = matters.map(m => `
+  el.innerHTML = matters.map(m => {
+    const status = m.status || 'Active';
+    const statusColor = STATUS_COLORS[status] || 'chip-gray';
+    const ref = m.internal_ref || m.number || '';
+    const extRef = m.external_ref || '';
+    return `
     <div class="matter-item">
       <div class="matter-row" onclick="toggleMatter('${m.id}')">
         <div class="matter-icon">📁</div>
         <div class="matter-expand">
-          <div class="matter-name">${m.name}</div>
+          <div class="matter-name">
+            ${ref ? `<span style="color:var(--ink3);font-size:0.75rem;font-weight:600;margin-right:6px">${escHtml(ref)}</span>` : ''}
+            ${escHtml(m.name)}
+          </div>
           <div class="matter-meta">
-            ${m.number ? `<span class="chip chip-gray">${m.number}</span>` : ''}
-            ${m.matter_type ? `<span class="chip chip-green">${m.matter_type.replace(/_/g,' ')}</span>` : ''}
-            <span style="font-size:0.7rem;color:var(--ink3)">${m.document_count || 0} document${m.document_count !== 1 ? 's' : ''}</span>
+            ${extRef ? `<span class="chip chip-blue" title="External reference">${escHtml(extRef)}</span>` : ''}
+            ${m.matter_type ? `<span class="chip chip-gray">${m.matter_type.replace(/_/g,' ')}</span>` : ''}
+            <span class="chip ${statusColor}">${escHtml(status)}</span>
+            <span style="font-size:0.7rem;color:var(--ink3)">${m.document_count || 0} doc${m.document_count !== 1 ? 's' : ''}</span>
+            ${(m.progress_notes||[]).length ? `<span style="font-size:0.7rem;color:var(--ink3)">${m.progress_notes.length} note${m.progress_notes.length !== 1 ? 's' : ''}</span>` : ''}
           </div>
         </div>
         <div class="matter-actions">
@@ -1249,8 +1435,8 @@ function renderMattersList() {
       <div class="matter-docs" id="matter-docs-${m.id}">
         <div id="docs-content-${m.id}" style="font-size:0.8rem;color:var(--ink3)">Loading…</div>
       </div>
-    </div>
-  `).join('');
+    </div>`
+  }).join('');
 }
 
 async function toggleMatter(id) {
@@ -1259,15 +1445,81 @@ async function toggleMatter(id) {
   const isOpen = docsEl.classList.contains('open');
   docsEl.classList.toggle('open', !isOpen);
   icon.textContent = isOpen ? '▶' : '▼';
-  if (!isOpen) {
-    try {
-      const res = await fetch(`${API}/api/matters/${id}/documents`);
-      const docs = await res.json();
-      const content = document.getElementById(`docs-content-${id}`);
-      if (!docs.length) {
-        content.innerHTML = '<p style="padding:0.5rem 0;color:var(--ink3)">No documents uploaded yet.</p>';
-      } else {
-        content.innerHTML = docs.map(d => `
+  if (!isOpen) await renderMatterPanel(id);
+}
+
+async function renderMatterPanel(id) {
+  const matter = matters.find(m => m.id === id);
+  if (!matter) return;
+  const content = document.getElementById(`docs-content-${id}`);
+  content.innerHTML = '<div style="padding:0.5rem 0;color:var(--ink3)">Loading…</div>';
+
+  try {
+    const res = await fetch(`${API}/api/matters/${id}/documents`);
+    const docs = await res.json();
+    const status = matter.status || 'Active';
+    const notes = matter.progress_notes || [];
+
+    content.innerHTML = `
+      <!-- Matter metadata controls -->
+      <div style="padding:0.75rem 0;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:0.72rem;color:var(--ink3);font-weight:600">INT REF</label>
+          <input type="text" value="${escHtml(matter.internal_ref || matter.number || '')}"
+            style="width:80px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:0.75rem"
+            onchange="updateMatterField('${id}','internal_ref',this.value)" placeholder="NGM 1"/>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:0.72rem;color:var(--ink3);font-weight:600">EXT REF</label>
+          <input type="text" value="${escHtml(matter.external_ref || '')}"
+            style="width:120px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:0.75rem"
+            onchange="updateMatterField('${id}','external_ref',this.value)" placeholder="HC 1234/26"/>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:0.72rem;color:var(--ink3);font-weight:600">STATUS</label>
+          <select style="padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:0.75rem"
+                  onchange="updateMatterField('${id}','status',this.value)">
+            ${['Active','Awaiting Client','Awaiting Court','On Hold','Closed'].map(s =>
+              `<option value="${s}" ${s===status?'selected':''}>${s}</option>`
+            ).join('')}
+            <option value="__custom__">+ Custom…</option>
+          </select>
+        </div>
+        ${matter.custom_status ? `<span class="chip chip-gray">${escHtml(matter.custom_status)}</span>` : ''}
+      </div>
+
+      <!-- Progress Notes -->
+      <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
+        <div style="font-weight:600;font-size:0.78rem;color:var(--ink2);margin-bottom:0.5rem">📝 Progress Notes</div>
+        <div style="display:flex;gap:8px;margin-bottom:0.6rem">
+          <textarea id="note-input-${id}" rows="2"
+            placeholder="Add a note… e.g. 'Called deeds office, to follow up 14 July 2026'"
+            style="flex:1;padding:0.5rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;resize:vertical;font-family:inherit"
+            onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))addNote('${id}')"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="addNote('${id}')" style="align-self:flex-end">Add</button>
+        </div>
+        <div id="note-date-prompt-${id}" style="display:none"></div>
+        <div id="notes-list-${id}">
+          ${notes.length ? notes.map(n => `
+            <div style="padding:0.4rem 0;border-bottom:1px solid var(--paper3);display:flex;gap:8px;align-items:flex-start">
+              <div style="flex:1">
+                <div style="font-size:0.8rem">${escHtml(n.text)}</div>
+                <div style="font-size:0.68rem;color:var(--ink3);margin-top:2px">${n.author} · ${n.created_at?.slice(0,10)}</div>
+              </div>
+              <button onclick="deleteNote('${id}','${n.id}')"
+                style="background:none;border:none;color:var(--ink3);cursor:pointer;font-size:0.75rem;padding:2px 4px">✕</button>
+            </div>`).join('') : '<p style="color:var(--ink3);font-size:0.78rem">No notes yet.</p>'}
+        </div>
+      </div>
+
+      <!-- Documents -->
+      <div style="padding:0.75rem 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem">
+          <div style="font-weight:600;font-size:0.78rem;color:var(--ink2)">📄 Documents</div>
+          <button class="btn btn-sm btn-outline" onclick="uploadToMatter('${id}')">⬆ Add Document</button>
+        </div>
+        ${!docs.length ? '<p style="color:var(--ink3);font-size:0.78rem">No documents uploaded yet.</p>' :
+          docs.map(d => `
           <div class="doc-item">
             <span>📄</span>
             <div style="flex:1">
@@ -1275,20 +1527,173 @@ async function toggleMatter(id) {
               <div class="doc-meta">
                 ${d.document_type ? `<span class="chip chip-gray">${d.document_type.replace(/_/g,' ')}</span>` : ''}
                 ${d.doc_date ? `<span class="chip chip-blue">${d.doc_date}</span>` : ''}
-                ${d.ocr_used ? `<span class="chip chip-gold">OCR scanned</span>` : ''}
+                ${d.ocr_used ? `<span class="chip chip-gold">OCR</span>` : ''}
                 <span class="chip ${d.status==='complete'?'chip-green':d.status==='error'?'chip-red':'chip-gold'}">${d.status}</span>
               </div>
             </div>
             ${d.status === 'complete' ? `
-            <button class="btn btn-sm btn-outline" onclick="extractDates('${d.id}', '${escHtml(d.filename)}')" 
-                    title="Extract court dates and deadlines from this document">
-              📅 Extract Dates
-            </button>` : ''}
-          </div>
-        `).join('');
-      }
+            <button class="btn btn-sm btn-outline" onclick="extractDates('${d.id}','${escHtml(d.filename)}')"
+                    title="Extract court dates and deadlines">📅 Extract Dates</button>` : ''}
+          </div>`).join('')}
+      </div>
+    `;
+  } catch(e) {
+    content.innerHTML = '<p style="color:var(--ink3)">Could not load matter details.</p>';
+  }
+}
+
+async function updateMatterField(matterId, field, value) {
+  if (value === '__custom__') {
+    value = prompt('Enter custom status:');
+    if (!value) return;
+    // Store as custom_status and set status to the custom value
+    await fetch(`${API}/api/matters/${matterId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ status: value, custom_status: value })
+    });
+  } else {
+    await fetch(`${API}/api/matters/${matterId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ [field]: value })
+    });
+  }
+  // Update local cache
+  const m = matters.find(m => m.id === matterId);
+  if (m) m[field] = value;
+  renderMattersList();
+}
+
+async function addNote(matterId) {
+  const input = document.getElementById(`note-input-${matterId}`);
+  const text = input.value.trim();
+  if (!text) return;
+
+  const btn = input.nextElementSibling;
+  btn.disabled = true;
+  btn.innerHTML = '…';
+
+  try {
+    const res = await fetch(`${API}/api/matters/${matterId}/notes`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ text, author: 'NGM' })
+    });
+    const data = await res.json();
+    input.value = '';
+
+    // Update local matter notes cache
+    const m = matters.find(m => m.id === matterId);
+    if (m) {
+      if (!m.progress_notes) m.progress_notes = [];
+      m.progress_notes.unshift({ id: data.id, text: data.text, author: data.author, created_at: data.created_at });
+      m.last_activity = data.created_at;
+    }
+
+    // Check for detected dates
+    if (data.detected_dates && data.detected_dates.length > 0) {
+      showNoteDatePrompt(matterId, data.detected_dates);
+    }
+
+    // Re-render the panel to show new note
+    await renderMatterPanel(matterId);
+
+  } catch(e) {
+    alert('Failed to add note. Please try again.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Add';
+  }
+}
+
+function showNoteDatePrompt(matterId, dates) {
+  const container = document.getElementById(`note-date-prompt-${matterId}`);
+  if (!container) return;
+
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div style="background:#fdf6e8;border:1px solid #f0c040;border-radius:6px;padding:0.75rem;margin-bottom:0.75rem">
+      <div style="font-weight:600;font-size:0.78rem;margin-bottom:0.5rem">📅 Date detected in note — add to calendar?</div>
+      ${dates.map((d, i) => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <input type="checkbox" id="note-date-${matterId}-${i}" checked style="width:14px;height:14px">
+          <label for="note-date-${matterId}-${i}" style="font-size:0.78rem;cursor:pointer">
+            <strong>${escHtml(d.date)}</strong>${d.time ? ` at ${escHtml(d.time)}` : ''} — ${escHtml(d.title)}
+          </label>
+        </div>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="addNoteDatesToCalendar('${matterId}', ${JSON.stringify(dates).replace(/"/g,'&quot;')})">Add to Calendar</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('note-date-prompt-${matterId}').style.display='none'">Dismiss</button>
+      </div>
+    </div>`;
+}
+
+async function addNoteDatesToCalendar(matterId, dates) {
+  const selected = dates.filter((_, i) => {
+    const cb = document.getElementById(`note-date-${matterId}-${i}`);
+    return cb && cb.checked;
+  });
+
+  let added = 0;
+  for (const d of selected) {
+    try {
+      await fetch(`${API}/api/calendar`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          title: d.title,
+          date: d.date,
+          time: d.time || null,
+          event_type: d.event_type || 'other',
+          matter_id: d.matter_id || matterId,
+          matter_name: d.matter_name || null,
+          notes: `From progress note`,
+        })
+      });
+      added++;
     } catch(e) {}
   }
+
+  const prompt = document.getElementById(`note-date-prompt-${matterId}`);
+  if (prompt) prompt.style.display = 'none';
+
+  if (added > 0) {
+    const notif = document.createElement('div');
+    notif.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:var(--green);color:white;padding:0.75rem 1.25rem;border-radius:6px;font-size:0.85rem;font-weight:600;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.2)';
+    notif.textContent = `✓ ${added} date${added!==1?'s':''} added to calendar`;
+    document.body.appendChild(notif);
+    setTimeout(() => notif.remove(), 3500);
+  }
+}
+
+function uploadToMatter(matterId) {
+  // Pre-select this matter in the upload dropdown, then switch to vault tab
+  selectedMatterId = matterId;
+  showTab('vault');
+  const sel = document.getElementById('upload-matter-select');
+  if (sel) sel.value = matterId;
+  // Scroll to the upload zone
+  setTimeout(() => {
+    const zone = document.getElementById('upload-zone');
+    if (zone) zone.scrollIntoView({behavior:'smooth', block:'center'});
+    // Flash the upload zone to draw attention
+    zone.style.borderColor = 'var(--green)';
+    zone.style.background = 'rgba(39,174,96,0.05)';
+    setTimeout(() => {
+      zone.style.borderColor = '';
+      zone.style.background = '';
+    }, 1500);
+  }, 150);
+}
+
+async function deleteNote(matterId, noteId) {
+  await fetch(`${API}/api/matters/${matterId}/notes/${noteId}`, {method:'DELETE'});
+  const m = matters.find(m => m.id === matterId);
+  if (m && m.progress_notes) {
+    m.progress_notes = m.progress_notes.filter(n => n.id !== noteId);
+  }
+  await renderMatterPanel(matterId);
 }
 
 async function deleteMatter(id) {
@@ -1298,6 +1703,7 @@ async function deleteMatter(id) {
   populateMatterSelects();
   renderMattersList();
 }
+
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 function handleDragOver(e) { e.preventDefault(); document.getElementById('upload-zone').classList.add('drag'); }
@@ -1952,6 +2358,11 @@ const DOC_TYPE_LABELS = {
   freeform: "Document",
 };
 
+const LITIGATION_DOC_TYPES = new Set([
+  'summons_matrimonial', 'summons_civil', 'court_application',
+  'urgent_chamber', 'notice_of_appeal', 'review', 'heads_of_argument'
+]);
+
 function selectDocType(type) {
   currentDocType = type;
   document.querySelectorAll('.doc-type-btn').forEach(b => b.classList.remove('selected'));
@@ -1960,6 +2371,23 @@ function selectDocType(type) {
   document.getElementById('draft-form-title').textContent = `Step 2 — ${DOC_TYPE_LABELS[type] || 'Document'} Details`;
   document.getElementById('draft-step2').scrollIntoView({behavior:'smooth', block:'nearest'});
   populateDraftPrecedentSelect();
+
+  // Adjust party/court fields based on whether this is a litigation document
+  const isLitigation = LITIGATION_DOC_TYPES.has(type);
+  document.getElementById('draft-court-row').style.display = isLitigation ? 'flex' : 'none';
+  document.getElementById('draft-parties-label').textContent = isLitigation ? 'Parties' : 'Parties Involved';
+
+  if (isLitigation) {
+    document.getElementById('draft-party-a-label').textContent = 'Plaintiff / Applicant';
+    document.getElementById('draft-party-b-label').textContent = 'Defendant / Respondent';
+    document.getElementById('draft-plaintiff').placeholder = 'e.g. MARY CHIGUMBA';
+    document.getElementById('draft-defendant').placeholder = 'e.g. JOHN CHIGUMBA';
+  } else {
+    document.getElementById('draft-party-a-label').textContent = 'First Party';
+    document.getElementById('draft-party-b-label').textContent = 'Second Party';
+    document.getElementById('draft-plaintiff').placeholder = 'e.g. company or individual name';
+    document.getElementById('draft-defendant').placeholder = 'e.g. other party name (if applicable)';
+  }
 }
 
 function resetDraftTab() {
@@ -2564,7 +2992,7 @@ function closeDateModal() {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-init();
+checkAuthAndBoot();
 </script>
 </body>
 </html>
