@@ -1455,7 +1455,7 @@ function renderMattersList() {
           <span style="color:var(--ink3);font-size:0.8rem" id="expand-icon-${m.id}">▶</span>
         </div>
       </div>
-      <div class="matter-docs" id="matter-docs-${m.id}">
+      <div class="matter-docs" id="matter-docs-${m.id}" onclick="event.stopPropagation()">
         <div id="docs-content-${m.id}" style="font-size:0.8rem;color:var(--ink3)">Loading…</div>
       </div>
     </div>`
@@ -1469,6 +1469,7 @@ async function toggleMatter(id) {
   docsEl.classList.toggle('open', !isOpen);
   icon.textContent = isOpen ? '▶' : '▼';
   if (!isOpen) await renderMatterPanel(id);
+  // If closing, do nothing — don't re-render
 }
 
 async function renderMatterPanel(id) {
@@ -1514,12 +1515,13 @@ async function renderMatterPanel(id) {
       <!-- Progress Notes -->
       <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
         <div style="font-weight:600;font-size:0.78rem;color:var(--ink2);margin-bottom:0.5rem">📝 Progress Notes</div>
-        <div style="display:flex;gap:8px;margin-bottom:0.6rem">
-          <textarea id="note-input-${id}" rows="2"
+        <div style="display:flex;gap:8px;margin-bottom:0.6rem" onclick="event.stopPropagation()">
+          <textarea id="note-input-${id}" rows="3"
             placeholder="Add a note… e.g. 'Called deeds office, to follow up 14 July 2026'"
-            style="flex:1;padding:0.5rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;resize:vertical;font-family:inherit"
-            onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))addNote('${id}')"></textarea>
-          <button class="btn btn-primary btn-sm" onclick="addNote('${id}')" style="align-self:flex-end">Add</button>
+            style="flex:1;padding:0.5rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;resize:vertical;font-family:inherit;min-height:60px"
+            onclick="event.stopPropagation()"
+            onkeydown="event.stopPropagation();if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))addNote('${id}')"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();addNote('${id}')" style="align-self:flex-end;min-width:60px">Add</button>
         </div>
         <div id="note-date-prompt-${id}" style="display:none"></div>
         <div id="notes-list-${id}">
