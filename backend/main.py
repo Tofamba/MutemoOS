@@ -848,6 +848,10 @@ async def bulk_import_matters(file: UploadFile = File(...)):
                         v = row[c_idx]
                         return str(v).strip() if v is not None else ""
                 return ""
+            # Skip template example rows
+            internal_ref_val = g("internal_ref")
+            if internal_ref_val.upper().startswith("EXAMPLE"):
+                continue
             matter, err = build_matter(
                 g("internal_ref"), g("client_name"), g("subject") or g("opposing"),
                 g("law_type"), g("external_ref"), g("action_done"),
