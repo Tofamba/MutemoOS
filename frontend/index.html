@@ -455,8 +455,31 @@ select{cursor:pointer}
 <div id="tab-matters" style="display:none">
   <div class="section-head">
     <h2>📂 Matter Dashboard</h2>
-    <p>All matters with indexed documents. Click to expand and view files.</p>
+    <p>All matters with indexed documents, progress notes, and status tracking.</p>
   </div>
+
+  <!-- Bulk Import -->
+  <div class="card" style="margin-bottom:1rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div>
+        <div class="card-title">⬆ Bulk Import Matters</div>
+        <div class="card-desc">Upload a completed Matter Register to create all your matters at once. Supports Word (.docx) and Excel (.xlsx).</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <a href="/api/matters/template-excel" download="MutemoDesk_Matter_Import_Template.xlsx"
+           class="btn btn-outline btn-sm">⬇ Excel Template</a>
+        <a href="/api/matters/template" download="MutemoDesk_Matter_Import_Template.docx"
+           class="btn btn-outline btn-sm">⬇ Word Template</a>
+        <input type="file" id="bulk-import-file" accept=".docx,.doc,.xlsx,.xlsm" style="display:none"
+               onchange="bulkImportMatters(this)"/>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('bulk-import-file').click()">
+          ⬆ Import Matters
+        </button>
+      </div>
+    </div>
+    <div id="bulk-import-status" class="status" style="margin-top:0.5rem"></div>
+  </div>
+
   <div id="matters-list"></div>
 </div>
 
@@ -1665,6 +1688,40 @@ async function addNoteDatesToCalendar(matterId, dates) {
     document.body.appendChild(notif);
     setTimeout(() => notif.remove(), 3500);
   }
+}
+
+async function bulkImportMatters(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('bulk-import-status');
+  statusEl.className = 'status show';
+  statusEl.innerHTML = '<span class="spinner"></span> Reading document and creating matters…';
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API}/api/matters/bulk-import`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Import failed'); }
+    const data = await res.json();
+
+    statusEl.className = 'status show success';
+    statusEl.innerHTML = `✓ Created <strong>${data.created}</strong> matter${data.created !== 1 ? 's' : ''}` +
+      (data.skipped > 0 ? ` · ${data.skipped} skipped (incomplete data)` : '') +
+      '. Refreshing list…';
+
+    // Reload matters from server
+    await loadMatters();
+    renderMattersList();
+
+    setTimeout(() => { statusEl.className = 'status'; }, 5000);
+  } catch(e) {
+    statusEl.className = 'status show error';
+    statusEl.innerHTML = `Import failed: ${escHtml(e.message)}`;
+  }
+  input.value = ''; // reset file input
 }
 
 function uploadToMatter(matterId) {

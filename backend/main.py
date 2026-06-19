@@ -224,7 +224,8 @@ async def session_auth_middleware(request, call_next):
         return await call_next(request)  # OTP auth not configured — open access
 
     # Always allow auth endpoints and health check through
-    open_paths = ("/api/health", "/api/auth/request-otp", "/api/auth/verify-otp", "/api/auth/status")
+    open_paths = ("/api/health", "/api/auth/request-otp", "/api/auth/verify-otp",
+                  "/api/auth/status", "/api/matters/template", "/api/matters/template-excel")
     if request.url.path in open_paths:
         return await call_next(request)
 
@@ -580,6 +581,30 @@ async def create_matter(matter: MatterCreate):
     save_state()
     return obj
 
+@app.get("/api/matters/template")
+async def download_matter_template():
+    """Serve the Matter Register Import Template DOCX."""
+    template_path = os.path.join(frontend_path, "MutemoDesk_Matter_Import_Template.docx")
+    if os.path.exists(template_path):
+        return FileResponse(
+            template_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename="MutemoDesk_Matter_Import_Template.docx"
+        )
+    raise HTTPException(status_code=404, detail="Template not found")
+
+@app.get("/api/matters/template-excel")
+async def download_matter_template_excel():
+    """Serve the Matter Register Import Template XLSX."""
+    template_path = os.path.join(frontend_path, "MutemoDesk_Matter_Import_Template.xlsx")
+    if os.path.exists(template_path):
+        return FileResponse(
+            template_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename="MutemoDesk_Matter_Import_Template.xlsx"
+        )
+    raise HTTPException(status_code=404, detail="Excel template not found")
+
 @app.patch("/api/matters/{matter_id}")
 async def update_matter(matter_id: str, update: MatterUpdate):
     if matter_id not in matters_db:
@@ -685,6 +710,219 @@ async def delete_matter(matter_id: str):
     await asyncio.to_thread(remove_chunks_from_chroma, removed_chunk_ids, "firm")
     save_state()
     return {"deleted": True}
+
+# ── Bulk Matter Import ─────────────────────────────────────────────────────────
+
+@app.post("/api/matters/bulk-import")
+async def bulk_import_matters(file: UploadFile = File(...)):
+    """
+    Parse a Word document (.docx) or Excel spreadsheet (.xlsx) containing
+    matter data and create all matters automatically.
+
+    Word format: one table per matter (Nyari's format / Word template).
+    Excel format: one row per matter with column headers (Excel template).
+    """
+    content = await file.read()
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+
+    if ext not in ("docx", "doc", "xlsx", "xlsm"):
+        raise HTTPException(status_code=422, detail="Only .docx, .doc, .xlsx or .xlsm files supported")
+
+    VALID_STATUSES = {"Active", "Awaiting Client", "Awaiting Court", "On Hold", "Closed"}
+
+    LAW_TYPE_MAP = {
+        "matrimonial": "matrimonial", "divorce": "matrimonial",
+        "estate": "estate", "inheritance": "estate",
+        "trust": "trust",
+        "conveyancing": "conveyancing", "transfer": "conveyancing",
+        "eviction": "eviction",
+        "labour": "employment", "employment": "employment",
+        "criminal": "criminal",
+        "debt": "debt_collection", "debt collection": "debt_collection",
+        "mining": "mining",
+        "company": "company_law", "commercial": "commercial_contract",
+        "property": "commercial_property", "land": "commercial_property",
+        "family": "family_law", "custody": "family_law", "guardianship": "family_law",
+        "lease": "eviction", "constitutional": "constitutional",
+    }
+
+    def detect_matter_type(law_text: str) -> str:
+        if not law_text:
+            return "other"
+        law_lower = law_text.lower()
+        for key, val in LAW_TYPE_MAP.items():
+            if key in law_lower:
+                return val
+        return "other"
+
+    def detect_status(next_action: str, action_done: str) -> str:
+        combined = (f"{next_action} {action_done}").lower()
+        if any(w in combined for w in ["n/a", "file closed", "closed file", "client passed", "passed away", "deceased"]):
+            return "Closed"
+        if any(w in combined for w in ["awaiting client", "awaiting further instructions", "awaiting instructions"]):
+            return "Awaiting Client"
+        if any(w in combined for w in ["awaiting set down", "awaiting court", "awaiting hearing", "awaiting order", "awaiting judgment"]):
+            return "Awaiting Court"
+        if any(w in combined for w in ["on hold", "sleeping dogs", "in abeyance"]):
+            return "On Hold"
+        return "Active"
+
+    def build_matter(internal_ref, client_name, subject, law_text, external_ref,
+                     action_done, next_action, raw_status, latest_comm):
+        if not client_name and not internal_ref:
+            return None, "No client name or internal ref"
+
+        if client_name and subject:
+            matter_name = f"{client_name} — {subject}"
+        elif client_name:
+            matter_name = client_name
+        elif subject:
+            matter_name = subject
+        else:
+            matter_name = internal_ref
+
+        status = raw_status if raw_status in VALID_STATUSES else detect_status(next_action or "", action_done or "")
+        matter_type = detect_matter_type(law_text or "")
+        now = datetime.utcnow().isoformat()
+        mid = str(uuid.uuid4())
+
+        notes = []
+        if action_done and str(action_done).lower() not in ("", "n/a", "-"):
+            notes.append({"id": str(uuid.uuid4()), "text": f"Action done: {action_done}", "author": "Import", "created_at": now})
+        if next_action and str(next_action).lower() not in ("", "n/a", "-"):
+            notes.append({"id": str(uuid.uuid4()), "text": f"Next action: {next_action}", "author": "Import", "created_at": now})
+        if latest_comm and str(latest_comm).strip():
+            notes.append({"id": str(uuid.uuid4()), "text": f"Latest communication: {latest_comm}", "author": "Import", "created_at": now})
+
+        return {
+            "id": mid, "name": matter_name, "number": internal_ref,
+            "internal_ref": internal_ref or "", "external_ref": external_ref or "",
+            "client_name": client_name or "", "matter_type": matter_type,
+            "status": status, "custom_status": "", "created_at": now,
+            "last_activity": now, "document_count": 0, "progress_notes": notes,
+        }, None
+
+    created = []
+    skipped = []
+
+    if ext in ("xlsx", "xlsm"):
+        # ── Excel import ──────────────────────────────────────────────────────
+        import openpyxl, io as _io
+        wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True, read_only=True)
+        ws = wb.active
+
+        # Find header row — look for a row containing "client" or "internal ref"
+        header_row = None
+        header_map = {}
+        COL_ALIASES = {
+            "internal ref": "internal_ref", "file name": "internal_ref",
+            "client name": "client_name", "client": "client_name",
+            "matter description": "subject", "matter": "subject", "re": "subject",
+            "opposing party": "opposing", "opposing party / re": "subject",
+            "area of law": "law_type", "law": "law_type",
+            "external ref": "external_ref", "case number": "external_ref",
+            "status": "status",
+            "action done": "action_done",
+            "next action": "next_action",
+            "latest communication": "latest_comm", "latest": "latest_comm",
+        }
+        for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            row_vals = [str(c).lower().strip().rstrip("*").strip() if c else "" for c in row]
+            if any(v in COL_ALIASES for v in row_vals):
+                header_row = r_idx
+                for c_idx, val in enumerate(row_vals):
+                    canonical = COL_ALIASES.get(val)
+                    if canonical:
+                        header_map[c_idx] = canonical
+                break
+
+        if not header_row:
+            raise HTTPException(status_code=422, detail="Could not find a header row in the Excel file. Ensure column headers match the template.")
+
+        for row in ws.iter_rows(min_row=header_row + 2, values_only=True):  # +2 to skip hint row
+            if not any(row):
+                continue
+            def g(field):
+                for c_idx, f in header_map.items():
+                    if f == field and c_idx < len(row):
+                        v = row[c_idx]
+                        return str(v).strip() if v is not None else ""
+                return ""
+            matter, err = build_matter(
+                g("internal_ref"), g("client_name"), g("subject") or g("opposing"),
+                g("law_type"), g("external_ref"), g("action_done"),
+                g("next_action"), g("status"), g("latest_comm")
+            )
+            if matter:
+                matters_db[matter["id"]] = matter
+                created.append({"id": matter["id"], "name": matter["name"],
+                                "internal_ref": matter["internal_ref"],
+                                "client_name": matter["client_name"],
+                                "status": matter["status"],
+                                "matter_type": matter["matter_type"]})
+            else:
+                skipped.append({"reason": err, "row": str(row)[:100]})
+        wb.close()
+
+    else:
+        # ── Word import ───────────────────────────────────────────────────────
+        import docx as docx_lib, io as _io
+        try:
+            doc = docx_lib.Document(_io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Could not read document: {e}")
+
+        FIELD_MAP = {
+            "file name": "internal_ref", "file name / internal ref": "internal_ref",
+            "internal ref": "internal_ref",
+            "name of client": "client_name", "client": "client_name",
+            "re": "subject", "re (opposing party / subject)": "subject",
+            "area of law": "law_type", "law": "law_type",
+            "external reference": "external_ref", "case number": "external_ref",
+            "action done": "action_done", "next action": "next_action",
+            "status": "status",
+            "latest communication": "latest_communication", "latest": "latest_communication",
+        }
+
+        for table in doc.tables:
+            fields = {}
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                if len(cells) >= 2:
+                    label = cells[0].lower().strip().rstrip(":")
+                    value = "\n".join(cells[1:]).strip()
+                    canonical = FIELD_MAP.get(label)
+                    if canonical:
+                        fields[canonical] = value
+
+            matter, err = build_matter(
+                fields.get("internal_ref", ""),
+                fields.get("client_name", ""),
+                fields.get("subject", ""),
+                fields.get("law_type", ""),
+                fields.get("external_ref", ""),
+                fields.get("action_done", ""),
+                fields.get("next_action", ""),
+                fields.get("status", ""),
+                fields.get("latest_communication", ""),
+            )
+            if matter:
+                matters_db[matter["id"]] = matter
+                created.append({"id": matter["id"], "name": matter["name"],
+                                "internal_ref": matter["internal_ref"],
+                                "client_name": matter["client_name"],
+                                "status": matter["status"],
+                                "matter_type": matter["matter_type"]})
+            else:
+                skipped.append({"reason": err, "fields": {k: v[:50] for k, v in fields.items()}})
+
+    save_state()
+    return {
+        "created": len(created),
+        "skipped": len(skipped),
+        "matters": created,
+        "skipped_details": skipped,
+    }
 
 # ── Documents ─────────────────────────────────────────────────────────────────
 
