@@ -3089,7 +3089,7 @@ async def send_test_reminder():
 
     upcoming = get_upcoming_for_reminders()
     try:
-        send_reminder_email(reminder_settings["recipient_email"], upcoming, test=True)
+        await asyncio.to_thread(send_reminder_email, reminder_settings["recipient_email"], upcoming, True)
         return {"sent": True, "event_count": len(upcoming)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send: {e}")
@@ -3301,7 +3301,7 @@ def send_reminder_email(recipient: str, events: list, test: bool = False):
         ics_part.add_header("Content-Disposition", "attachment", filename="mutemo-desk-events.ics")
         msg.attach(ics_part)
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
         server.starttls()
         server.login(smtp_user, smtp_password)
         server.sendmail(from_addr, [recipient], msg.as_string())
@@ -3425,7 +3425,7 @@ def send_inactivity_alert_email(recipient: str, stale_matters: list):
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
         server.starttls()
         server.login(smtp_user, smtp_password)
         server.sendmail(from_addr, [recipient], msg.as_string())
