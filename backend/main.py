@@ -3486,7 +3486,7 @@ if __name__ == "__main__":
 
     def handle_shutdown(signum, frame):
         print("\n[shutdown] saving state before exit...")
-        await safe_save()
+        save_state()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_shutdown)
