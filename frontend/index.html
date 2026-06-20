@@ -265,6 +265,10 @@ select{cursor:pointer}
   </div>
   <div class="header-firm" style="display:flex;align-items:center;gap:12px">
     <span>Sawyer &amp; Mkushi Legal Practitioners</span>
+    <span id="current-user-display"
+          onclick="openIdentityModal()"
+          style="font-size:0.75rem;opacity:0.8;cursor:pointer;padding:3px 8px;border-radius:4px;background:rgba(255,255,255,0.15)"
+          title="Click to change name">👤</span>
     <button onclick="logout()" style="background:rgba(255,255,255,0.15);border:none;color:white;padding:4px 10px;border-radius:4px;font-size:0.7rem;cursor:pointer">Log out</button>
   </div>
 </header>
@@ -1211,6 +1215,19 @@ select{cursor:pointer}
   </div>
 </div>
 
+<!-- ═══════════════ IDENTITY MODAL ═══════════════ -->
+<div id="identity-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2001;align-items:center;justify-content:center">
+  <div style="background:white;max-width:360px;width:90%;border-radius:8px;padding:1.5rem;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:0.5rem">👤 Who are you?</div>
+    <p style="font-size:0.82rem;color:var(--ink2);margin-bottom:1rem">Your name will appear on all progress notes and actions you take in the system.</p>
+    <input type="text" id="identity-name-input"
+      placeholder="e.g. Nyari Maphosa"
+      style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:4px;font-size:0.9rem;margin-bottom:1rem"
+      onkeydown="if(event.key==='Enter')saveIdentity()"/>
+    <button class="btn btn-primary" style="width:100%" onclick="saveIdentity()">Save & Continue</button>
+  </div>
+</div>
+
 <!-- ═══════════════ NOTE MODAL ═══════════════ -->
 <div id="note-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
   <div style="background:white;max-width:480px;width:90%;border-radius:8px;padding:1.5rem;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
@@ -1246,6 +1263,53 @@ async function init() {
   await loadMatters();
   renderCalendar();
   showTab('search');
+  checkUserIdentity();
+}
+
+// ── User Identity ─────────────────────────────────────────────────────────────
+// Stored in localStorage so each browser/device remembers who is using it.
+// Simple name prompt — no accounts needed yet.
+
+function getCurrentUser() {
+  return localStorage.getItem('mutemo_user_name') || '';
+}
+
+function setCurrentUser(name) {
+  localStorage.setItem('mutemo_user_name', name.trim());
+  updateUserDisplay();
+}
+
+function updateUserDisplay() {
+  const name = getCurrentUser();
+  const el = document.getElementById('current-user-display');
+  if (el) el.textContent = name ? `👤 ${name}` : '👤 Set name';
+}
+
+function checkUserIdentity() {
+  const name = getCurrentUser();
+  if (!name) {
+    // First time — show the identity prompt after a short delay
+    setTimeout(() => openIdentityModal(), 800);
+  } else {
+    updateUserDisplay();
+  }
+}
+
+function openIdentityModal() {
+  document.getElementById('identity-modal').style.display = 'flex';
+  const input = document.getElementById('identity-name-input');
+  if (input) {
+    input.value = getCurrentUser();
+    setTimeout(() => input.focus(), 100);
+  }
+}
+
+function saveIdentity() {
+  const input = document.getElementById('identity-name-input');
+  const name = input?.value?.trim();
+  if (!name) { alert('Please enter your name.'); return; }
+  setCurrentUser(name);
+  document.getElementById('identity-modal').style.display = 'none';
 }
 
 // ── Authentication ───────────────────────────────────────────────────────────
@@ -1610,9 +1674,10 @@ async function updateMatterField(matterId, field, value) {
   renderMattersList();
 }
 
-async function addNote(matterId, noteText) {
+async function addNote(matterId, noteText, author) {
   const text = noteText || (document.getElementById(`note-input-${matterId}`)?.value || '').trim();
   if (!text) return;
+  const noteAuthor = author || getCurrentUser() || 'NGM';
   const btn = document.getElementById(`note-add-btn-${matterId}`);
   if (btn) { btn.disabled = true; btn.innerHTML = '…'; }
 
@@ -1620,7 +1685,7 @@ async function addNote(matterId, noteText) {
     const res = await fetch(`${API}/api/matters/${matterId}/notes`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ text, author: 'NGM' })
+      body: JSON.stringify({ text, author: noteAuthor })
     });
     const data = await res.json();
     // Clear inline input if it exists
@@ -3096,7 +3161,8 @@ async function submitNoteModal() {
   const input = document.getElementById('note-modal-input');
   const text = input.value.trim();
   if (!text || !_noteMatterId) return;
-  await addNote(_noteMatterId, text);
+  const author = getCurrentUser() || 'NGM';
+  await addNote(_noteMatterId, text, author);
   closeNoteModal();
 }
 
