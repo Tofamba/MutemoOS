@@ -45,10 +45,9 @@ _load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Module is fully loaded by the time this runs, so reminder_scheduler_loop exists
+    global _write_lock
+    _write_lock = asyncio.Lock()  # initialise write lock at startup
     asyncio.create_task(reminder_scheduler_loop())
-    # Pre-load embedding model + ChromaDB in the background so the first
-    # search isn't slow. Non-fatal if it fails — search falls back to keyword.
     async def warm_up():
         try:
             await asyncio.to_thread(get_embedding_model)
@@ -296,6 +295,9 @@ def get_chroma_collections():
     return _firm_collection, _legal_collection, _zlr_collection
 
 # ── In-memory store (pilot) — persisted to disk as JSON ────────────────────────
+# ⚠️  SINGLE-TENANT: All data is shared across all users of this deployment.
+# Do NOT add a second law firm to this instance without implementing firm_id
+# isolation. Deploy a separate Railway instance per firm until then.
 matters_db: dict = {}
 documents_db: dict = {}
 chunks_db: list = []
@@ -317,66 +319,123 @@ reminder_settings: dict = {
     "last_run_date": None,  # tracks daily dedupe
 }
 
+# ── Write lock — prevents race conditions when multiple users write simultaneously ──
+_write_lock: asyncio.Lock = None  # initialised in lifespan
+
+async def safe_save():
+    """Thread-safe state persistence — acquires write lock before saving."""
+    global _write_lock
+    if _write_lock is None:
+        _write_lock = asyncio.Lock()
+    async with _write_lock:
+        await asyncio.to_thread(save_state)
+
+# ── Firm identity — configurable per deployment ───────────────────────────────────
+FIRM_NAME = os.environ.get("MUTEMO_FIRM_NAME", "Sawyer & Mkushi Legal Practitioners")
+FIRM_CITY = os.environ.get("MUTEMO_FIRM_CITY", "Harare, Zimbabwe")
+
+# ── Admin token — protects expensive admin endpoints ─────────────────────────────
+ADMIN_TOKEN = os.environ.get("MUTEMO_ADMIN_TOKEN")
+
+def require_admin(request: Request):
+    """Require X-Admin-Token header if MUTEMO_ADMIN_TOKEN is set."""
+    if ADMIN_TOKEN:
+        token = request.headers.get("X-Admin-Token", "")
+        if token != ADMIN_TOKEN:
+            raise HTTPException(status_code=403, detail="Admin access required")
+
 # ── Persistence ──────────────────────────────────────────────────────────────────
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 STATE_FILE = os.path.join(DATA_DIR, "mutemo_state.json")
 
+CHUNKS_FILE = os.path.join(DATA_DIR, "mutemo_chunks.json")
+
 def save_state():
-    """Persist all in-memory stores to a JSON file on disk, with backup rotation."""
+    """Persist core state (matters, calendar, settings) — fast, called on every write."""
     try:
         import shutil, glob
         os.makedirs(DATA_DIR, exist_ok=True)
         state = {
             "matters_db": matters_db,
             "documents_db": documents_db,
-            "chunks_db": chunks_db,
             "calendar_db": calendar_db,
             "legal_updates_db": legal_updates_db,
-            "legal_update_chunks": legal_update_chunks,
             "zlr_db": zlr_db,
-            "zlr_chunks": zlr_chunks,
             "reminder_settings": reminder_settings,
         }
-        # Keep last 3 backups before overwriting
+        # Create hourly backups only — not on every write
         if os.path.exists(STATE_FILE):
-            backup = os.path.join(DATA_DIR, f"mutemo_state_{datetime.utcnow():%Y%m%d_%H%M%S}.json")
-            shutil.copy2(STATE_FILE, backup)
-            old_backups = sorted(glob.glob(os.path.join(DATA_DIR, "mutemo_state_2*.json")))
-            for old in old_backups[:-3]:
-                os.remove(old)
+            now = datetime.utcnow()
+            hour_stamp = now.strftime("%Y%m%d_%H")
+            backup = os.path.join(DATA_DIR, f"mutemo_state_{hour_stamp}.json")
+            if not os.path.exists(backup):  # only once per hour
+                shutil.copy2(STATE_FILE, backup)
+                old_backups = sorted(glob.glob(os.path.join(DATA_DIR, "mutemo_state_2*.json")))
+                for old in old_backups[:-24]:  # keep last 24 hourly backups (1 day)
+                    os.remove(old)
         tmp_path = STATE_FILE + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False)
-        os.replace(tmp_path, STATE_FILE)  # atomic write
+        os.replace(tmp_path, STATE_FILE)
     except Exception as e:
         print(f"[persistence] failed to save state: {e}")
+
+def save_chunks():
+    """Persist chunk data — only called when documents are added or deleted."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        chunks_state = {
+            "chunks_db": chunks_db,
+            "legal_update_chunks": legal_update_chunks,
+            "zlr_chunks": zlr_chunks,
+        }
+        tmp_path = CHUNKS_FILE + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(chunks_state, f, ensure_ascii=False)
+        os.replace(tmp_path, CHUNKS_FILE)
+    except Exception as e:
+        print(f"[persistence] failed to save chunks: {e}")
 
 def load_state():
     """Load persisted state from disk into the in-memory stores, if present."""
     global matters_db, documents_db, chunks_db, calendar_db
-    global legal_updates_db, legal_update_chunks, reminder_settings
+    global legal_updates_db, legal_update_chunks, reminder_settings, zlr_db, zlr_chunks
 
-    if not os.path.exists(STATE_FILE):
+    # Load main state
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            matters_db.clear(); matters_db.update(state.get("matters_db", {}))
+            documents_db.clear(); documents_db.update(state.get("documents_db", {}))
+            calendar_db[:] = state.get("calendar_db", [])
+            legal_updates_db.clear(); legal_updates_db.update(state.get("legal_updates_db", {}))
+            zlr_db.clear(); zlr_db.update(state.get("zlr_db", {}))
+            reminder_settings.update(state.get("reminder_settings", {}))
+            # Legacy: load chunks from main state file if chunks file doesn't exist yet
+            if not os.path.exists(CHUNKS_FILE):
+                chunks_db[:] = state.get("chunks_db", [])
+                legal_update_chunks[:] = state.get("legal_update_chunks", [])
+                zlr_chunks[:] = state.get("zlr_chunks", [])
+        except Exception as e:
+            print(f"[persistence] failed to load state: {e} — starting fresh")
+    else:
         print("[persistence] no existing state file — starting fresh")
-        return
 
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        matters_db.clear(); matters_db.update(state.get("matters_db", {}))
-        documents_db.clear(); documents_db.update(state.get("documents_db", {}))
-        chunks_db[:] = state.get("chunks_db", [])
-        calendar_db[:] = state.get("calendar_db", [])
-        legal_updates_db.clear(); legal_updates_db.update(state.get("legal_updates_db", {}))
-        legal_update_chunks[:] = state.get("legal_update_chunks", [])
-        zlr_db.clear(); zlr_db.update(state.get("zlr_db", {}))
-        zlr_chunks[:] = state.get("zlr_chunks", [])
-        reminder_settings.update(state.get("reminder_settings", {}))
-        print(f"[persistence] loaded state: {len(matters_db)} matters, "
-              f"{len(documents_db)} documents, {len(calendar_db)} calendar events, "
-              f"{len(legal_updates_db)} legal updates")
-    except Exception as e:
-        print(f"[persistence] failed to load state: {e} — starting fresh")
+    # Load chunks from separate file if it exists
+    if os.path.exists(CHUNKS_FILE):
+        try:
+            with open(CHUNKS_FILE, "r", encoding="utf-8") as f:
+                chunks_state = json.load(f)
+            chunks_db[:] = chunks_state.get("chunks_db", [])
+            legal_update_chunks[:] = chunks_state.get("legal_update_chunks", [])
+            zlr_chunks[:] = chunks_state.get("zlr_chunks", [])
+        except Exception as e:
+            print(f"[persistence] failed to load chunks: {e}")
+
+    print(f"[persistence] loaded: {len(matters_db)} matters, "
+          f"{len(documents_db)} documents, {len(calendar_db)} calendar events, "
+          f"{len(chunks_db)} chunks, {len(zlr_db)} ZLR cases")
 
 load_state()
 
@@ -405,7 +464,7 @@ class MatterUpdate(BaseModel):
 
 class ProgressNote(BaseModel):
     text: str
-    author: Optional[str] = "NGM"
+    author: Optional[str] = None
 
 class AffidavitRequest(BaseModel):
     matter_type: Optional[str] = None
@@ -495,14 +554,15 @@ async def health():
     return result
 
 @app.post("/api/admin/reindex")
-async def reindex_semantic_search():
+async def reindex_semantic_search(request: Request):
+    require_admin(request)
     """
     One-time migration: embed all existing chunks (uploaded before semantic
     search was added) and store them in ChromaDB. Safe to call multiple times
     — re-adding the same IDs simply overwrites them.
     """
     try:
-        firm_col, legal_col = get_chroma_collections()
+        firm_col, legal_col, _ = get_chroma_collections()
         before_firm = firm_col.count()
         before_legal = legal_col.count()
 
@@ -521,7 +581,8 @@ async def reindex_semantic_search():
         raise HTTPException(status_code=500, detail=f"Re-index failed: {e}")
 
 @app.post("/api/admin/reclassify-zlr")
-async def reclassify_zlr():
+async def reclassify_zlr(request: Request):
+    require_admin(request)
     """
     Re-run AI classification on all ZLR entries currently showing 'General'
     category. Updates category, summary, and subject_chains in place.
@@ -547,7 +608,7 @@ async def reclassify_zlr():
                     updated += 1
             except Exception:
                 failed += 1
-    save_state()
+    await safe_save()
     return {"updated": updated, "failed": failed, "total": len(zlr_db)}
 
 
@@ -578,7 +639,7 @@ async def create_matter(matter: MatterCreate):
         "progress_notes": [],
     }
     matters_db[mid] = obj
-    save_state()
+    await safe_save()
     return obj
 
 @app.get("/api/matters/template")
@@ -613,7 +674,7 @@ async def update_matter(matter_id: str, update: MatterUpdate):
     for field, value in update.dict(exclude_none=True).items():
         m[field] = value
     m["last_activity"] = datetime.utcnow().isoformat()
-    save_state()
+    await safe_save()
     return m
 
 @app.post("/api/matters/{matter_id}/notes")
@@ -626,12 +687,12 @@ async def add_progress_note(matter_id: str, note: ProgressNote):
     entry = {
         "id": str(uuid.uuid4()),
         "text": note.text,
-        "author": note.author or "NGM",
+        "author": note.author or "Unknown",
         "created_at": datetime.utcnow().isoformat(),
     }
     m["progress_notes"].insert(0, entry)  # newest first
     m["last_activity"] = entry["created_at"]
-    save_state()
+    await safe_save()
 
     # Quietly scan the note text for actionable dates
     detected_dates = []
@@ -693,7 +754,7 @@ async def delete_progress_note(matter_id: str, note_id: str):
     m = matters_db[matter_id]
     notes = m.get("progress_notes", [])
     m["progress_notes"] = [n for n in notes if n["id"] != note_id]
-    save_state()
+    await safe_save()
     return {"deleted": True}
 
 @app.delete("/api/matters/{matter_id}")
@@ -708,7 +769,7 @@ async def delete_matter(matter_id: str):
     removed_chunk_ids = [c["id"] for c in chunks_db if c["matter_id"] == matter_id]
     chunks_db = [c for c in chunks_db if c["matter_id"] != matter_id]
     await asyncio.to_thread(remove_chunks_from_chroma, removed_chunk_ids, "firm")
-    save_state()
+    await safe_save()
     return {"deleted": True}
 
 # ── Bulk Matter Import ─────────────────────────────────────────────────────────
@@ -920,7 +981,7 @@ async def bulk_import_matters(file: UploadFile = File(...)):
             else:
                 skipped.append({"reason": err, "fields": {k: v[:50] for k, v in fields.items()}})
 
-    save_state()
+    await safe_save()
     return {
         "created": len(created),
         "skipped": len(skipped),
@@ -955,11 +1016,11 @@ async def upload_document(
 
     try:
         if ext == "pdf":
-            text, page_count, ocr_used = extract_pdf_text(content)
+            text, page_count, ocr_used = await asyncio.to_thread(extract_pdf_text, content)
         elif ext in ("docx", "doc"):
-            text = extract_docx_text(content)
+            text = await asyncio.to_thread(extract_docx_text, content)
         elif ext in ("xlsx", "xlsm"):
-            text = extract_xlsx_text(content)
+            text = await asyncio.to_thread(extract_xlsx_text, content)
         elif ext in ("txt", "eml", "msg"):
             text = content.decode("utf-8", errors="replace")
         else:
@@ -1005,7 +1066,8 @@ async def upload_document(
         doc["status"] = "error"
         doc["error_message"] = "Could not extract text"
 
-    save_state()
+    await safe_save()
+    save_chunks()
     return doc
 
 # ── Legal Updates (Legislation & Case Law — ZimLII / Veritas etc.) ─────────────
@@ -1089,7 +1151,8 @@ async def upload_legal_update(
         item["status"] = "error"
         item["error_message"] = "Could not extract text"
 
-    save_state()
+    await safe_save()
+    save_chunks()
     return item
 
 @app.delete("/api/legal-updates/{item_id}")
@@ -1101,7 +1164,8 @@ async def delete_legal_update(item_id: str):
     removed_chunk_ids = [c["id"] for c in legal_update_chunks if c["document_id"] == item_id]
     legal_update_chunks = [c for c in legal_update_chunks if c["document_id"] != item_id]
     await asyncio.to_thread(remove_chunks_from_chroma, removed_chunk_ids, "legal")
-    save_state()
+    await safe_save()
+    save_chunks()
     return {"deleted": True}
 
 @app.post("/api/legal-updates/search")
@@ -1733,7 +1797,8 @@ FULL TEXT:
     item["chunk_count"] = len(new_chunks)
     await asyncio.to_thread(index_chunks_in_chroma, new_chunks, "zlr")
 
-    save_state()
+    await safe_save()
+    save_chunks()
     return item
 
 
@@ -2030,7 +2095,8 @@ SUMMARY: {case.get('summary') or ''}"""
 
     # Index all chunks in ChromaDB in one batch
     await asyncio.to_thread(index_chunks_in_chroma, all_chunks, "zlr")
-    save_state()
+    await safe_save()
+    save_chunks()
 
     # Return category breakdown
     from collections import Counter
@@ -2054,7 +2120,8 @@ async def delete_zlr_entry(item_id: str):
     removed_ids = [c["id"] for c in zlr_chunks if c["document_id"] == item_id]
     zlr_chunks = [c for c in zlr_chunks if c["document_id"] != item_id]
     await asyncio.to_thread(remove_chunks_from_chroma, removed_ids, "zlr")
-    save_state()
+    await safe_save()
+    save_chunks()
     return {"deleted": True}
 
 @app.post("/api/zlr/search")
@@ -2199,7 +2266,7 @@ def semantic_search_firm(req) -> list:
     used_semantic = False
 
     try:
-        firm_col, _ = get_chroma_collections()
+        firm_col, _, _ = get_chroma_collections()
         if firm_col.count() > 0:
             used_semantic = True
             query_vec = embed_texts([req.query])[0]
@@ -2316,7 +2383,7 @@ def semantic_search_legal(req) -> list:
     used_semantic = False
 
     try:
-        _, legal_col = get_chroma_collections()
+        _, legal_col, _ = get_chroma_collections()
         if legal_col.count() > 0:
             used_semantic = True
             query_vec = embed_texts([req.query])[0]
@@ -2416,7 +2483,7 @@ def synthesise_answer_sync(query: str, results: list, legal_results: list = None
         msg = client.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=1024,
-            messages=[{"role": "user", "content": f"""Legal research assistant for Sawyer & Mkushi, Zimbabwe.
+            messages=[{"role": "user", "content": f"""Legal research assistant for {FIRM_NAME}, Zimbabwe.
 
 Query: "{query}"
 
@@ -2438,7 +2505,7 @@ Professional, direct, max 4 paragraphs. Clearly distinguish firm precedent from 
 
 # ── Affidavit Generator ───────────────────────────────────────────────────────
 
-AFFIDAVIT_SYSTEM = """You are a legal drafting assistant for Sawyer & Mkushi Legal Practitioners, Harare.
+AFFIDAVIT_SYSTEM = """You are a legal drafting assistant for {FIRM_NAME}, Harare.
 Draft affidavits in proper Zimbabwe High Court form per SI 202/2021.
 - Full court caption with case number, party names and designations
 - Opening: deponent full name, ID, capacity, competency declaration
@@ -2480,7 +2547,7 @@ Draft the complete affidavit:"""
             client.messages.create,
             model="claude-sonnet-4-5",
             max_tokens=4096,
-            system=AFFIDAVIT_SYSTEM,
+            system=AFFIDAVIT_SYSTEM.format(FIRM_NAME=FIRM_NAME),
             messages=[{"role": "user", "content": prompt}]
         )
         return {"affidavit": msg.content[0].text, "document_id": str(uuid.uuid4())[:8].upper()}
@@ -2541,12 +2608,12 @@ argument on each issue (with case law citations where possible, noting Zimbabwe 
 conclusion and relief sought. Logical, concise, persuasive. Number all paragraphs.
 Reference Zimbabwe case law and Roman-Dutch common law principles as appropriate.""",
 
-    "legal_opinion": """You are drafting a formal Legal Opinion for a Zimbabwe law firm (Sawyer & Mkushi).
+    "legal_opinion": """You are drafting a formal Legal Opinion for a Zimbabwe law firm ({FIRM_NAME}).
 Structure: instruction/question posed, brief facts, applicable law (Acts, case law, common law),
 analysis, conclusion/advice, qualifications/caveats. Professional, precise, hedged appropriately.
 Cite Zimbabwe legislation and case law where relevant.""",
 
-    "client_letter": """You are drafting a formal client letter for Sawyer & Mkushi Legal Practitioners, Harare.
+    "client_letter": """You are drafting a formal client letter for {FIRM_NAME}, Harare.
 Include: firm header block, date, client address, reference/matter heading, formal salutation,
 clear body paragraphs, action points if any, formal closing. Professional Zimbabwe legal correspondence style.""",
 
@@ -2556,7 +2623,7 @@ representations and warranties where appropriate, breach and remedies,
 governing law (Zimbabwe), dispute resolution, signature blocks.
 Follow Zimbabwe contract law principles (Roman-Dutch common law base).""",
 
-    "freeform": """You are a legal drafting assistant for Sawyer & Mkushi Legal Practitioners, Harare, Zimbabwe.
+    "freeform": """You are a legal drafting assistant for {FIRM_NAME}, Harare, Zimbabwe.
 Draft the legal document described below following Zimbabwe law, court rules, and legal practice.
 Use appropriate formal legal language. Structure the document correctly for its type.
 Include all standard components for this kind of document in Zimbabwe legal practice.""",
@@ -2658,7 +2725,7 @@ dispute resolution. Draft with appropriate hedging language where provisions
 are intended to be non-binding, and clear mandatory language where binding.""",
 }
 
-DOCUMENT_SYSTEM = """You are a senior legal drafting assistant for Sawyer & Mkushi Legal Practitioners, Harare, Zimbabwe.
+DOCUMENT_SYSTEM = """You are a senior legal drafting assistant for {FIRM_NAME}, Harare, Zimbabwe.
 You have deep expertise in:
 - Zimbabwe High Court Rules SI 202/2021
 - Roman-Dutch common law as applied in Zimbabwe
@@ -2737,7 +2804,7 @@ Draft the complete document now:"""
             client.messages.create,
             model="claude-sonnet-4-5",
             max_tokens=6000,
-            system=DOCUMENT_SYSTEM + "\n\n" + doc_system_addition,
+            system=(DOCUMENT_SYSTEM + "\n\n" + doc_system_addition).format(FIRM_NAME=FIRM_NAME),
             messages=[{"role": "user", "content": prompt}]
         )
         doc_id = str(uuid.uuid4())[:8].upper()
@@ -2978,14 +3045,14 @@ async def create_event(event: CalendarEvent):
     obj["id"] = str(uuid.uuid4())
     obj["created_at"] = datetime.utcnow().isoformat()
     calendar_db.append(obj)
-    save_state()
+    await safe_save()
     return obj
 
 @app.delete("/api/calendar/{event_id}")
 async def delete_event(event_id: str):
     global calendar_db
     calendar_db = [e for e in calendar_db if e["id"] != event_id]
-    save_state()
+    await safe_save()
     return {"deleted": True}
 
 @app.get("/api/calendar/upcoming")
@@ -3009,7 +3076,7 @@ async def update_reminder_settings(settings: ReminderSettings):
     reminder_settings["enabled"] = settings.enabled
     reminder_settings["recipient_email"] = settings.recipient_email
     reminder_settings["send_hour_utc"] = max(0, min(23, settings.send_hour_utc))
-    save_state()
+    await safe_save()
     return reminder_settings
 
 @app.post("/api/reminders/send-test")
@@ -3072,7 +3139,7 @@ def build_ics(events: list) -> str:
     for e in events:
         date_str = e["date"].replace("-", "")
         time_str = (e.get("time") or "09:00").replace(":", "") + "00"
-        dtstart = f"{date_str}T{time_str}"
+        dtstart = f"TZID=Africa/Harare:{date_str}T{time_str}"
         uid = f"{e.get('id', uuid.uuid4())}@mutemodesk"
         summary = escape_ics((e.get("title") or "Event").replace("\n", " "))
         desc_parts = []
@@ -3195,10 +3262,12 @@ def escape_html(s: str) -> str:
     return (s or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
 def send_reminder_email(recipient: str, events: list, test: bool = False):
-    smtp_host = os.environ["SMTP_HOST"]
+    smtp_host = os.environ.get("SMTP_HOST") or ""
+    if not smtp_host:
+        raise RuntimeError("SMTP_HOST not configured")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ["SMTP_USER"]
-    smtp_password = os.environ["SMTP_PASSWORD"]
+    smtp_user = os.environ.get("SMTP_USER") or ""
+    smtp_password = os.environ.get("SMTP_PASSWORD") or ""
     from_addr = os.environ.get("SMTP_FROM", smtp_user)
 
     text_body, html_body = build_reminder_email_body(events)
@@ -3250,7 +3319,7 @@ def get_stale_matters(threshold_days: int = 14) -> list:
     matters_with_upcoming = set()
     for event in calendar_db:
         try:
-            event_date = datetime.fromisoformat(event["date"])
+            event_date = datetime.strptime(event["date"], "%Y-%m-%d")
             if event_date > future_cutoff and event.get("matter_id"):
                 matters_with_upcoming.add(event["matter_id"])
             elif event_date > future_cutoff and event.get("matter_name"):
@@ -3291,10 +3360,12 @@ def get_stale_matters(threshold_days: int = 14) -> list:
 
 def send_inactivity_alert_email(recipient: str, stale_matters: list):
     """Send a digest email listing matters with no activity for 14+ days."""
-    smtp_host = os.environ["SMTP_HOST"]
+    smtp_host = os.environ.get("SMTP_HOST") or ""
+    if not smtp_host:
+        raise RuntimeError("SMTP_HOST not configured")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ["SMTP_USER"]
-    smtp_password = os.environ["SMTP_PASSWORD"]
+    smtp_user = os.environ.get("SMTP_USER") or ""
+    smtp_password = os.environ.get("SMTP_PASSWORD") or ""
     from_addr = os.environ.get("SMTP_FROM", smtp_user)
 
     rows = ""
@@ -3371,7 +3442,7 @@ async def reminder_scheduler_loop():
                 if now.hour == target_hour and not already_sent:
                     upcoming = get_upcoming_for_reminders()
                     reminder_settings["last_run_date"] = today_str
-                    save_state()
+                    await safe_save()
                     try:
                         send_reminder_email(reminder_settings["recipient_email"], upcoming)
                     except Exception as e:
@@ -3415,7 +3486,7 @@ if __name__ == "__main__":
 
     def handle_shutdown(signum, frame):
         print("\n[shutdown] saving state before exit...")
-        save_state()
+        await safe_save()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_shutdown)
