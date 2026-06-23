@@ -2996,33 +2996,29 @@ async def extract_dates_from_document(req: ExtractDatesRequest):
     def extract_sync():
         msg = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=1000,
-            messages=[{"role": "user", "content": f"""Extract all dates, deadlines, and obligations from this Zimbabwe court document.
+            max_tokens=2000,
+            messages=[{"role": "user", "content": f"""Extract all specific dates, deadlines, and court dates from this Zimbabwe court document.
 Today's date is {today}.
 
-Return ONLY valid JSON in this exact format, no other text:
-{{
-  "events": [
-    {{
-      "title": "brief description of the obligation or event",
-      "date": "YYYY-MM-DD",
-      "time": "HH:MM or null",
-      "event_type": "hearing|deadline|filing|other",
-      "court": "court name or null",
-      "notes": "any additional context"
-    }}
-  ]
-}}
+Return ONLY a JSON object with an "events" array. Each event must have:
+- title: brief description
+- date: YYYY-MM-DD format
+- time: HH:MM or null
+- event_type: hearing, deadline, filing, or other
+- court: court name or null
+- notes: any context
 
-Only include events with specific dates. Ignore vague references like "within a reasonable time".
-Matter name: {matter_name}
+Only include events with a specific calendar date. Skip vague timeframes.
 
-Document text:
+Matter: {matter_name}
+
+Document:
 {full_text}
 
-JSON:"""}]
+JSON response:"""},
+            {"role": "assistant", "content": '{\"events\": ['}]
         )
-        raw = msg.content[0].text.strip()
+        raw = '{\"events\": [' + msg.content[0].text.strip()
         raw = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
         # Try direct parse first
         try:
