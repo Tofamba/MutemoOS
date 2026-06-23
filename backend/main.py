@@ -3060,7 +3060,7 @@ JSON response:"""},
 
 @app.get("/api/calendar")
 async def list_events():
-    return sorted(calendar_db, key=lambda x: (x["date"], x.get("time", "")))
+    return sorted(calendar_db, key=lambda x: (x.get("date") or "9999-99-99", x.get("time") or ""))
 
 @app.post("/api/calendar")
 async def create_event(event: CalendarEvent):
