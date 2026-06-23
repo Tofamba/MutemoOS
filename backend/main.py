@@ -3024,9 +3024,26 @@ JSON:"""}]
         )
         raw = msg.content[0].text.strip()
         raw = re.sub(r'^```json\s*|\s*```$', '', raw, flags=re.MULTILINE).strip()
+        # Try direct parse first
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+        # Try extracting just the JSON object
         m = re.search(r'\{[\s\S]*\}', raw)
         if m:
-            return json.loads(m.group(0))
+            try:
+                return json.loads(m.group(0))
+            except json.JSONDecodeError:
+                pass
+        # Try to find and parse just the events array
+        m2 = re.search(r'"events"\s*:\s*(\[[\s\S]*?\])', raw)
+        if m2:
+            try:
+                events = json.loads(m2.group(1))
+                return {"events": events}
+            except json.JSONDecodeError:
+                pass
         return {"events": []}
 
     try:
