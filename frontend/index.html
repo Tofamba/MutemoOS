@@ -484,6 +484,14 @@ select{cursor:pointer}
     <div id="bulk-import-status" class="status" style="margin-top:0.5rem"></div>
   </div>
 
+  <!-- Matters Search -->
+  <div style="margin-bottom:1rem;display:flex;gap:8px;align-items:center">
+    <input type="text" id="matters-search" placeholder="🔍 Search matters by name, client, or reference…"
+      style="flex:1;padding:0.6rem 0.85rem;border:1px solid var(--border);border-radius:6px;font-size:0.85rem;font-family:inherit"
+      oninput="filterMatters(this.value)"/>
+    <span id="matters-count" style="font-size:0.75rem;color:var(--ink3);white-space:nowrap"></span>
+  </div>
+
   <div id="matters-list"></div>
 </div>
 
@@ -1499,18 +1507,46 @@ const STATUS_COLORS = {
   'Closed': 'chip-red',
 };
 
-function renderMattersList() {
+function renderMattersList(filtered = null) {
   const el = document.getElementById('matters-list');
+  const countEl = document.getElementById('matters-count');
   if (!el) return;
-  if (!matters.length) {
-    el.innerHTML = '<div class="empty-state"><div class="icon">📂</div><p>No matters yet. Upload documents to create your first matter.</p></div>';
+
+  // Sort by last_activity descending (most recent first)
+  const sorted = [...matters].sort((a, b) => {
+    const aDate = a.last_activity || a.created_at || '';
+    const bDate = b.last_activity || b.created_at || '';
+    return bDate.localeCompare(aDate);
+  });
+
+  // Use filtered list if searching, otherwise show top 10
+  const isSearching = filtered !== null;
+  const displayList = isSearching ? filtered : sorted.slice(0, 10);
+  const total = matters.length;
+  const showing = displayList.length;
+
+  // Update count display
+  if (countEl) {
+    if (isSearching) {
+      countEl.textContent = `${showing} of ${total} matters`;
+    } else {
+      countEl.textContent = total > 10 ? `Showing 10 of ${total} — search to find others` : `${total} matter${total !== 1 ? 's' : ''}`;
+    }
+  }
+
+  if (!displayList.length) {
+    el.innerHTML = isSearching
+      ? '<div class="empty-state"><p>No matters match your search.</p></div>'
+      : '<div class="empty-state"><div class="icon">📂</div><p>No matters yet. Upload documents or use Bulk Import to get started.</p></div>';
     return;
   }
-  el.innerHTML = matters.map(m => {
+
+  el.innerHTML = displayList.map(m => {
     const status = m.status || 'Active';
     const statusColor = STATUS_COLORS[status] || 'chip-gray';
     const ref = m.internal_ref || m.number || '';
     const extRef = m.external_ref || '';
+    const lastActivity = m.last_activity ? m.last_activity.slice(0, 10) : '';
     return `
     <div class="matter-item">
       <div class="matter-row" onclick="toggleMatter('${m.id}')">
@@ -1526,6 +1562,7 @@ function renderMattersList() {
             <span class="chip ${statusColor}">${escHtml(status)}</span>
             <span style="font-size:0.7rem;color:var(--ink3)">${m.document_count || 0} doc${m.document_count !== 1 ? 's' : ''}</span>
             ${(m.progress_notes||[]).length ? `<span style="font-size:0.7rem;color:var(--ink3)">${m.progress_notes.length} note${m.progress_notes.length !== 1 ? 's' : ''}</span>` : ''}
+            ${lastActivity ? `<span style="font-size:0.7rem;color:var(--ink3)">· ${lastActivity}</span>` : ''}
           </div>
         </div>
         <div class="matter-actions">
@@ -1538,6 +1575,23 @@ function renderMattersList() {
       </div>
     </div>`
   }).join('');
+}
+
+function filterMatters(query) {
+  if (!query.trim()) {
+    renderMattersList();
+    return;
+  }
+  const q = query.toLowerCase();
+  const filtered = matters.filter(m =>
+    (m.name || '').toLowerCase().includes(q) ||
+    (m.internal_ref || '').toLowerCase().includes(q) ||
+    (m.external_ref || '').toLowerCase().includes(q) ||
+    (m.client_name || '').toLowerCase().includes(q) ||
+    (m.matter_type || '').toLowerCase().includes(q) ||
+    (m.number || '').toLowerCase().includes(q)
+  );
+  renderMattersList(filtered);
 }
 
 async function toggleMatter(id) {
