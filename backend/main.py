@@ -3333,8 +3333,9 @@ def is_email_configured() -> bool:
     """Check if Resend API key is configured."""
     return bool(os.environ.get("RESEND_API_KEY"))
 
-def send_via_resend(to: str, subject: str, html_body: str, text_body: str) -> None:
+def send_via_resend(to: str, subject: str, html_body: str, text_body: str, ics_content: str = None) -> None:
     """Send email via Resend API (HTTPS — works on Railway)."""
+    import base64
     api_key = os.environ.get("RESEND_API_KEY") or ""
     if not api_key:
         raise RuntimeError("RESEND_API_KEY not configured")
@@ -3346,6 +3347,11 @@ def send_via_resend(to: str, subject: str, html_body: str, text_body: str) -> No
         "html": html_body,
         "text": text_body,
     }
+    if ics_content:
+        payload["attachments"] = [{
+            "filename": "mutemo-events.ics",
+            "content": base64.b64encode(ics_content.encode("utf-8")).decode("utf-8"),
+        }]
     try:
         import httpx
         with httpx.Client(timeout=15) as client:
@@ -3392,7 +3398,8 @@ def send_reminder_email(recipient: str, events: list, test: bool = False):
     else:
         subject = f"{subject_prefix}⚖ Mutemo Desk — Daily reminder (nothing upcoming)"
 
-    send_via_resend(recipient, subject, html_body, text_body)
+    ics_content = build_ics(events) if events else None
+    send_via_resend(recipient, subject, html_body, text_body, ics_content)
 
 def send_inactivity_alert_email(recipient: str, stale_matters: list):
     """Send matter inactivity digest via Resend API."""
