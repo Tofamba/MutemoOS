@@ -3322,30 +3322,47 @@ def is_email_configured() -> bool:
 
 def send_via_resend(to: str, subject: str, html_body: str, text_body: str) -> None:
     """Send email via Resend API (HTTPS — works on Railway)."""
-    import urllib.request
     api_key = os.environ.get("RESEND_API_KEY") or ""
     if not api_key:
         raise RuntimeError("RESEND_API_KEY not configured")
     from_addr = os.environ.get("RESEND_FROM", "onboarding@resend.dev")
-    payload = json.dumps({
+    payload = {
         "from": f"Mutemo Desk <{from_addr}>",
         "to": [to],
         "subject": subject,
         "html": html_body,
         "text": text_body,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        if resp.status not in (200, 201):
-            raise RuntimeError(f"Resend API error: {resp.status}")
+    }
+    try:
+        import httpx
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                "https://api.resend.com/emails",
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code not in (200, 201):
+                raise RuntimeError(f"Resend API error {resp.status_code}: {resp.text}")
+    except ImportError:
+        # Fallback to urllib if httpx not available
+        import urllib.request, urllib.error
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "MutemoDesk/1.0 Python/3.11",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                if r.status not in (200, 201):
+                    raise RuntimeError(f"Resend API error: {r.status}")
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"HTTP Error {e.code}: {e.read().decode()}")
 
 def send_reminder_email(recipient: str, events: list, test: bool = False):
     """Send daily calendar reminder via Resend API."""
