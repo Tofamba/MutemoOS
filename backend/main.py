@@ -18,12 +18,9 @@ import os
 import json
 import uuid
 import re
-import smtplib
 import asyncio
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 from datetime import datetime, timedelta
 
 # ── Load .env file if present (simple built-in loader, no extra dependency) ────
@@ -269,10 +266,20 @@ def get_embedding_model():
     return _embedding_model
 
 def embed_texts(texts: list) -> list:
-    """Convert a list of strings into embedding vectors."""
+    """Convert a list of strings into embedding vectors.
+    Returns a list of flat float lists — shape: (n_texts, embedding_dim).
+    """
+    import numpy as np
     model = get_embedding_model()
     vectors = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-    return vectors.tolist()
+    vectors = np.array(vectors)
+    # Ensure exactly 2D: (n_texts, dim)
+    if vectors.ndim == 1:
+        vectors = vectors.reshape(1, -1)
+    elif vectors.ndim > 2:
+        vectors = vectors.reshape(len(texts), -1)
+    # Return as plain Python list of lists of floats
+    return [v.tolist() for v in vectors]
 
 def get_chroma_collections():
     """Lazily initialize ChromaDB and return (firm_collection, legal_collection, zlr_collection)."""
@@ -533,7 +540,7 @@ async def health():
         "tesseract": shutil.which("tesseract") is not None,
         "pdftoppm": shutil.which("pdftoppm") is not None,
         "node": shutil.which("node") is not None,
-        "smtp_configured": is_smtp_configured(),
+        "smtp_configured": is_email_configured(),
         "semantic_search": embeddings_ok,
     }
     status = "ok" if deps["anthropic_key"] else "degraded"
@@ -2140,6 +2147,7 @@ def _zlr_semantic_search(query: str, category_filter: Optional[str], limit: int)
         _, _, zlr_col = get_chroma_collections()
         if zlr_col.count() > 0:
             query_vec = embed_texts([query])[0]
+            if hasattr(query_vec[0], "__len__"): query_vec = query_vec[0]
             res = zlr_col.query(
                 query_embeddings=[query_vec],
                 n_results=min(limit * 3, zlr_col.count())
@@ -2270,6 +2278,7 @@ def semantic_search_firm(req) -> list:
         if firm_col.count() > 0:
             used_semantic = True
             query_vec = embed_texts([req.query])[0]
+            if hasattr(query_vec[0], "__len__"): query_vec = query_vec[0]
 
             # Chroma 'where' filter — only matter_id is directly on chunk metadata
             where = {}
@@ -2387,6 +2396,7 @@ def semantic_search_legal(req) -> list:
         if legal_col.count() > 0:
             used_semantic = True
             query_vec = embed_texts([req.query])[0]
+            if hasattr(query_vec[0], "__len__"): query_vec = query_vec[0]
             res = legal_col.query(query_embeddings=[query_vec], n_results=3)
 
             ids = res["ids"][0] if res["ids"] else []
@@ -3068,7 +3078,7 @@ async def upcoming_events():
 async def get_reminder_settings():
     # Don't expose whether SMTP env vars are set in detail, just whether sending is configured
     settings = dict(reminder_settings)
-    settings["smtp_configured"] = bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_USER"))
+    settings["smtp_configured"] = is_email_configured()
     return settings
 
 @app.post("/api/reminders/settings")
@@ -3084,8 +3094,8 @@ async def send_test_reminder():
     """Send a test reminder email immediately, regardless of schedule."""
     if not reminder_settings.get("recipient_email"):
         raise HTTPException(status_code=400, detail="Set a recipient email first.")
-    if not is_smtp_configured():
-        raise HTTPException(status_code=500, detail="Email is not configured on the server. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM environment variables.")
+    if not is_email_configured():
+        raise HTTPException(status_code=500, detail="Email is not configured. Set RESEND_API_KEY in Railway environment variables.")
 
     upcoming = get_upcoming_for_reminders()
     try:
@@ -3093,13 +3103,6 @@ async def send_test_reminder():
         return {"sent": True, "event_count": len(upcoming)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send: {e}")
-
-def is_smtp_configured() -> bool:
-    return bool(
-        os.environ.get("SMTP_HOST") and
-        os.environ.get("SMTP_USER") and
-        os.environ.get("SMTP_PASSWORD")
-    )
 
 def get_upcoming_for_reminders(within_days: int = 7) -> list:
     """Return events from today up to `within_days` from now, with computed urgency."""
@@ -3261,51 +3264,6 @@ def build_reminder_email_body(events: list) -> tuple[str, str]:
 def escape_html(s: str) -> str:
     return (s or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
-def send_reminder_email(recipient: str, events: list, test: bool = False):
-    smtp_host = os.environ.get("SMTP_HOST") or ""
-    if not smtp_host:
-        raise RuntimeError("SMTP_HOST not configured")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ.get("SMTP_USER") or ""
-    smtp_password = os.environ.get("SMTP_PASSWORD") or ""
-    from_addr = os.environ.get("SMTP_FROM", smtp_user)
-
-    text_body, html_body = build_reminder_email_body(events)
-    if test:
-        text_body = "[TEST EMAIL]\n\n" + text_body
-        html_body = '<p style="background:#fdf6e8;padding:8px;border-radius:4px;font-size:13px"><strong>This is a test email.</strong></p>' + html_body
-
-    msg = MIMEMultipart("mixed")
-    subject_prefix = "[TEST] " if test else ""
-    if any(e["days_until"] == 0 for e in events):
-        subject = f"{subject_prefix}⚖ Mutemo Desk — Court date TODAY + upcoming"
-    elif events:
-        subject = f"{subject_prefix}⚖ Mutemo Desk — Daily reminder ({len(events)} upcoming)"
-    else:
-        subject = f"{subject_prefix}⚖ Mutemo Desk — Daily reminder (nothing upcoming)"
-
-    msg["Subject"] = subject
-    msg["From"] = from_addr
-    msg["To"] = recipient
-
-    alt = MIMEMultipart("alternative")
-    alt.attach(MIMEText(text_body, "plain"))
-    alt.attach(MIMEText(html_body, "html"))
-    msg.attach(alt)
-
-    if events:
-        ics_content = build_ics(events)
-        ics_part = MIMEBase("text", "calendar", method="PUBLISH")
-        ics_part.set_payload(ics_content)
-        encoders.encode_base64(ics_part)
-        ics_part.add_header("Content-Disposition", "attachment", filename="mutemo-desk-events.ics")
-        msg.attach(ics_part)
-
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.sendmail(from_addr, [recipient], msg.as_string())
-
 def get_stale_matters(threshold_days: int = 14) -> list:
     """
     Return matters that have had no activity for threshold_days days,
@@ -3358,16 +3316,56 @@ def get_stale_matters(threshold_days: int = 14) -> list:
     stale.sort(key=lambda x: x["days_since"], reverse=True)
     return stale
 
-def send_inactivity_alert_email(recipient: str, stale_matters: list):
-    """Send a digest email listing matters with no activity for 14+ days."""
-    smtp_host = os.environ.get("SMTP_HOST") or ""
-    if not smtp_host:
-        raise RuntimeError("SMTP_HOST not configured")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ.get("SMTP_USER") or ""
-    smtp_password = os.environ.get("SMTP_PASSWORD") or ""
-    from_addr = os.environ.get("SMTP_FROM", smtp_user)
+def is_email_configured() -> bool:
+    """Check if Resend API key is configured."""
+    return bool(os.environ.get("RESEND_API_KEY"))
 
+def send_via_resend(to: str, subject: str, html_body: str, text_body: str) -> None:
+    """Send email via Resend API (HTTPS — works on Railway)."""
+    import urllib.request
+    api_key = os.environ.get("RESEND_API_KEY") or ""
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY not configured")
+    from_addr = os.environ.get("RESEND_FROM", "onboarding@resend.dev")
+    payload = json.dumps({
+        "from": f"Mutemo Desk <{from_addr}>",
+        "to": [to],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"Resend API error: {resp.status}")
+
+def send_reminder_email(recipient: str, events: list, test: bool = False):
+    """Send daily calendar reminder via Resend API."""
+    text_body, html_body = build_reminder_email_body(events)
+    if test:
+        text_body = "[TEST EMAIL]\n\n" + text_body
+        html_body = '<p style="background:#fdf6e8;padding:8px;border-radius:4px;font-size:13px"><strong>This is a test email.</strong></p>' + html_body
+
+    subject_prefix = "[TEST] " if test else ""
+    if any(e["days_until"] == 0 for e in events):
+        subject = f"{subject_prefix}⚖ Mutemo Desk — Court date TODAY + upcoming"
+    elif events:
+        subject = f"{subject_prefix}⚖ Mutemo Desk — Daily reminder ({len(events)} upcoming)"
+    else:
+        subject = f"{subject_prefix}⚖ Mutemo Desk — Daily reminder (nothing upcoming)"
+
+    send_via_resend(recipient, subject, html_body, text_body)
+
+def send_inactivity_alert_email(recipient: str, stale_matters: list):
+    """Send matter inactivity digest via Resend API."""
     rows = ""
     for m in stale_matters:
         ref = m.get("internal_ref") or ""
@@ -3387,9 +3385,9 @@ def send_inactivity_alert_email(recipient: str, stale_matters: list):
 
     html_body = f"""
     <div style="font-family:Georgia,serif;max-width:700px;margin:0 auto">
-      <div style="background:#2c3e50;color:white;padding:16px 20px;border-radius:6px 6px 0 0">
+      <div style="background:#c45a1a;color:white;padding:16px 20px;border-radius:6px 6px 0 0">
         <div style="font-size:18px;font-weight:700">⚖ Mutemo Desk — Matter Inactivity Alert</div>
-        <div style="font-size:12px;opacity:0.7;margin-top:4px">Sawyer &amp; Mkushi Legal Practitioners</div>
+        <div style="font-size:12px;opacity:0.7;margin-top:4px">{FIRM_NAME}</div>
       </div>
       <div style="padding:20px;background:#fafafa;border:1px solid #e5e5e5;border-top:none">
         <p style="margin:0 0 16px">The following <strong>{len(stale_matters)} matter{'s' if len(stale_matters)!=1 else ''}</strong>
@@ -3418,23 +3416,14 @@ def send_inactivity_alert_email(recipient: str, stale_matters: list):
     for m in stale_matters:
         text_body += f"• {m.get('internal_ref','')} — {m['name']} ({m.get('days_since','?')} days)\n"
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"⚖ Mutemo Desk — {len(stale_matters)} matter{'s' if len(stale_matters)!=1 else ''} need attention"
-    msg["From"] = from_addr
-    msg["To"] = recipient
-    msg.attach(MIMEText(text_body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
-
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.sendmail(from_addr, [recipient], msg.as_string())
+    subject = f"⚖ Mutemo Desk — {len(stale_matters)} matter{'s' if len(stale_matters)!=1 else ''} need attention"
+    send_via_resend(recipient, subject, html_body, text_body)
 
 async def reminder_scheduler_loop():
     """Background loop — checks every 30 minutes whether it's time to send the daily reminder."""
     while True:
         try:
-            if reminder_settings.get("enabled") and reminder_settings.get("recipient_email") and is_smtp_configured():
+            if reminder_settings.get("enabled") and reminder_settings.get("recipient_email") and is_email_configured():
                 now = datetime.utcnow()
                 today_str = now.date().isoformat()
                 target_hour = reminder_settings.get("send_hour_utc", 5)
