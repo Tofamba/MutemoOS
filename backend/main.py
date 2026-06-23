@@ -3117,7 +3117,7 @@ async def send_test_reminder():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send: {e}")
 
-def get_upcoming_for_reminders(within_days: int = 14) -> list:
+def get_upcoming_for_reminders(within_days: int = 30) -> list:
     """Return events from today up to `within_days` from now, with computed urgency."""
     today = datetime.utcnow().date()
     cutoff = today + timedelta(days=within_days)
@@ -3193,8 +3193,8 @@ EVENT_TYPE_LABELS = {
 def build_reminder_email_body(events: list) -> tuple[str, str]:
     """Returns (plain_text_body, html_body)"""
     if not events:
-        text = "Good morning. You have no court dates, deadlines, or filings scheduled in the next 14 days.\n\n— Mutemo Desk"
-        html = "<p>Good morning. You have no court dates, deadlines, or filings scheduled in the next 14 days.</p><p style='color:#6b6b64'>— Mutemo Desk</p>"
+        text = "Good morning. You have no court dates, deadlines, or filings scheduled in the next 30 days.\n\n— Mutemo Desk"
+        html = "<p>Good morning. You have no court dates, deadlines, or filings scheduled in the next 30 days.</p><p style='color:#6b6b64'>— Mutemo Desk</p>"
         return text, html
 
     today_items = [e for e in events if e["days_until"] == 0]
@@ -3266,7 +3266,7 @@ def build_reminder_email_body(events: list) -> tuple[str, str]:
             <span style="font-size:13px;opacity:0.8">Daily Court Calendar Reminder</span>
         </div>
         <div style="padding:16px 20px;border:1px solid #d8d3c8;border-top:none;border-radius:0 0 6px 6px">
-            <p>Good morning. Here is your reminder summary for the next 14 days.</p>
+            <p>Good morning. Here is your reminder summary for the next 30 days.</p>
             {''.join(html_sections)}
             <p style="margin-top:16px;font-size:13px;color:#6b6b64">A calendar file (.ics) is attached — open it to add these events to your phone or computer calendar.</p>
         </div>
