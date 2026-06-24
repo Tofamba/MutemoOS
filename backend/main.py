@@ -3489,6 +3489,17 @@ async def reminder_scheduler_loop():
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 
+@app.get("/api/admin/export-state")
+async def export_state(request: Request):
+    require_admin_token(request)
+    state_path = os.path.join(os.path.dirname(__file__), "..", "data", "mutemo_state.json")
+    if not os.path.exists(state_path):
+        raise HTTPException(status_code=404, detail="State file not found")
+    return FileResponse(
+        state_path,
+        media_type="application/json",
+        filename="mutemo_state.json"
+    )
 @app.get("/")
 async def serve_frontend():
     index = os.path.join(frontend_path, "index.html")
