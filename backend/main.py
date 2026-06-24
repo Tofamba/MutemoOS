@@ -2836,7 +2836,7 @@ async def export_document_docx(req: DocxExportRequest):
 
     escaped_html = json.dumps(req.content_html)
 
-    js = f"""
+    js = rf"""
 const {{ Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, PageNumber }} = require('docx');
 const fs = require('fs');
 
@@ -3491,7 +3491,7 @@ async def reminder_scheduler_loop():
 
 @app.get("/api/admin/export-state")
 async def export_state(request: Request):
-    require_admin_token(request)
+    require_admin(request)
     state_path = os.path.join(os.path.dirname(__file__), "..", "data", "mutemo_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="State file not found")
